@@ -1,0 +1,61 @@
+<MudDialog Visible="@Visible" VisibleChanged="VisibleChanged" Options="@DialogOptions" Class="claude-remove-account-dialog" ActionsClass="aam-dialog-actions">
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h6">確認移除 Claude 帳號</MudText>
+            @if (Profile is not null) {
+                <MudText Typo="Typo.subtitle1">@(string.IsNullOrWhiteSpace(Profile.Alias) ? Profile.MaskedEmail : Profile.Alias)</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">身分：@Profile.MaskedEmail</MudText>
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                    確認後會移除此帳號在本工具保存的 Desktop 登入快照，之後無法再切換到這個帳號，需重新登入並保存。Claude Desktop 目前的登入狀態與 Code Session 不受影響。
+                </MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Error" Variant="Variant.Text" Disabled="@Busy" OnClick="ConfirmAsync">
+            @(Busy ? "正在移除…" : "確認移除")
+        </MudButton>
+        <MudButton Variant="Variant.Text" Disabled="@Busy" OnClick="CancelAsync">取消</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions DialogOptions = new() {
+        CloseButton = false,
+        CloseOnEscapeKey = true,
+        BackdropClick = false,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true
+    };
+
+    [Parameter]
+    public bool Visible { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> VisibleChanged { get; set; }
+
+    [Parameter, EditorRequired]
+    public ClaudeAccountProfile? Profile { get; set; }
+
+    [Parameter]
+    public bool Busy { get; set; }
+
+    [Parameter]
+    public EventCallback<Guid> OnConfirm { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private async Task ConfirmAsync() {
+        if (!Busy && Profile is not null) {
+            await OnConfirm.InvokeAsync(Profile.ProfileId);
+        }
+    }
+
+    private async Task CancelAsync() {
+        if (!Busy) {
+            await OnCancel.InvokeAsync();
+            await VisibleChanged.InvokeAsync(false);
+        }
+    }
+}

@@ -1,0 +1,14 @@
+{
+  "unrelatedSetting": "preserved fixture value",
+  "oauth:tokenCache": {
+    "fixture": {
+      "accessToken": "fixture-oauth-token-not-valid"
+    }
+  },
+  "oauth:tokenCacheV2": {
+    "fixture": {
+      "access_token": "fixture-oauth-token-v2-not-valid"
+    }
+  },
+  "lastKnownAccountUuid": "11111111-1111-4111-8111-111111111111"
+}

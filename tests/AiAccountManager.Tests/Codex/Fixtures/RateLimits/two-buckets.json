@@ -1,0 +1,20 @@
+{
+  "accountId": "chatgpt-account-123",
+  "rateLimits": {
+    "limitId": null,
+    "primary": { "usedPercent": 90, "windowDurationMins": 300 },
+    "secondary": { "usedPercent": 90, "windowDurationMins": 10080 }
+  },
+  "rateLimitsByLimitId": {
+    "codex": {
+      "limitId": null,
+      "primary": { "usedPercent": 15, "windowDurationMins": 10080, "resetsAt": 1900000000 },
+      "secondary": { "usedPercent": 35, "windowDurationMins": 300, "resetsAt": 1900000100 }
+    },
+    "cwa": {
+      "limitId": "cwa",
+      "primary": { "usedPercent": 80, "windowDurationMins": 300 },
+      "secondary": { "usedPercent": 85, "windowDurationMins": 10080 }
+    }
+  }
+}

@@ -1,0 +1,166 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <ApplicationIcon>Assets\ai-account-manager.ico</ApplicationIcon>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>CloudyWing.$(MSBuildProjectName)</AssemblyName>
+    <RootNamespace>CloudyWing.AiAccountManager.Desktop</RootNamespace>
+    <StartupObject>CloudyWing.AiAccountManager.Desktop.Program</StartupObject>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <UseAppHost>true</UseAppHost>
+    <BlazorWebViewHostPage>wwwroot\index.html</BlazorWebViewHostPage>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\ai-account-manager.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Wpf" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Web.WebView2" />
+    <PackageReference Include="MudBlazor" />
+    <PackageReference Include="Velopack" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AiAccountManager.Application\AiAccountManager.Application.csproj" />
+    <ProjectReference Include="..\AiAccountManager.Windows\AiAccountManager.Windows.csproj" />
+  </ItemGroup>
+<PropertyGroup>
+    <CodexAppServerZipPath Condition="'$(CodexAppServerZipPath)' == ''">$(MSBuildThisFileDirectory)..\..\.local\cache\codex-app-server\rust-v0.162.1\codex-app-server-x86_64-pc-windows-msvc.exe.zip</CodexAppServerZipPath>
+    <_CodexAppServerVerifierPath>$(MSBuildThisFileDirectory)..\AiAccountManager.Windows\Codex\CodexAppServerBinaryVerifier.cs</_CodexAppServerVerifierPath>
+  </PropertyGroup>
+
+  <Target Name="VerifyCodexAppServerBuildInputs" AfterTargets="Build">
+    <ReadLinesFromFile File="$(_CodexAppServerVerifierPath)">
+      <Output TaskParameter="Lines" ItemName="_CodexAppServerVerifierLines" />
+    </ReadLinesFromFile>
+    <PropertyGroup>
+      <_CodexAppServerOutputDirectory>$(TargetDir)tools\codex-app-server\0.162.1\</_CodexAppServerOutputDirectory>
+      <_CodexAppServerExecutablePath>$(_CodexAppServerOutputDirectory)codex-app-server-x86_64-pc-windows-msvc.exe</_CodexAppServerExecutablePath>
+      <_CodexAppServerManifestPath>$(_CodexAppServerOutputDirectory)codex-app-server.manifest.json</_CodexAppServerManifestPath>
+      <_CodexAppServerExtractionDirectory>$(IntermediateOutputPath)codex-app-server-extraction\</_CodexAppServerExtractionDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+      <_CodexAppServerArchiveHashLine Include="@(_CodexAppServerVerifierLines)" Condition="$([System.String]::new('%(_CodexAppServerVerifierLines.Identity)').Contains('ExpectedArchiveSha256 ='))">
+        <Sha256>$([System.Text.RegularExpressions.Regex]::Match('%(_CodexAppServerVerifierLines.Identity)', 'ExpectedArchiveSha256 = &quot;([A-Fa-f0-9]{64})&quot;').Groups[1].Value)</Sha256>
+      </_CodexAppServerArchiveHashLine>
+      <_CodexAppServerExecutableHashLine Include="@(_CodexAppServerVerifierLines)" Condition="$([System.String]::new('%(_CodexAppServerVerifierLines.Identity)').Contains('ExpectedExecutableSha256 ='))">
+        <Sha256>$([System.Text.RegularExpressions.Regex]::Match('%(_CodexAppServerVerifierLines.Identity)', 'ExpectedExecutableSha256 = &quot;([A-Fa-f0-9]{64})&quot;').Groups[1].Value)</Sha256>
+      </_CodexAppServerExecutableHashLine>
+    </ItemGroup>
+    <PropertyGroup>
+      <_CodexAppServerExpectedArchiveSha256>@(_CodexAppServerArchiveHashLine->'%(Sha256)')</_CodexAppServerExpectedArchiveSha256>
+      <_CodexAppServerExpectedExecutableSha256>@(_CodexAppServerExecutableHashLine->'%(Sha256)')</_CodexAppServerExpectedExecutableSha256>
+      <_CodexAppServerManifestContent>{"schema":"ai-account-manager.codex-app-server-binary.v1","version":"rust-v0.162.1","archiveSha256":"$(_CodexAppServerExpectedArchiveSha256)","executableSha256":"$(_CodexAppServerExpectedExecutableSha256)"}</_CodexAppServerManifestContent>
+      <_CodexAppServerOutputExecutableSha256></_CodexAppServerOutputExecutableSha256>
+      <_CodexAppServerOutputsVerified>false</_CodexAppServerOutputsVerified>
+      <_CodexAppServerArchiveSha256></_CodexAppServerArchiveSha256>
+    </PropertyGroup>
+    <Error
+      Condition="'@(_CodexAppServerArchiveHashLine->Count())' != '1' Or '@(_CodexAppServerExecutableHashLine->Count())' != '1' Or '$(_CodexAppServerExpectedArchiveSha256)' == '' Or '$(_CodexAppServerExpectedExecutableSha256)' == ''"
+      Text="Could not read the pinned Codex app-server hashes from CodexAppServerBinaryVerifier."
+    />
+    <GetFileHash Files="$(_CodexAppServerExecutablePath)" Algorithm="SHA256" HashEncoding="hex" Condition="Exists('$(_CodexAppServerExecutablePath)')">
+      <Output TaskParameter="Hash" PropertyName="_CodexAppServerOutputExecutableSha256" />
+    </GetFileHash>
+    <ReadLinesFromFile File="$(_CodexAppServerManifestPath)" Condition="Exists('$(_CodexAppServerManifestPath)')">
+      <Output TaskParameter="Lines" ItemName="_CodexAppServerOutputManifestLines" />
+    </ReadLinesFromFile>
+    <PropertyGroup>
+      <_CodexAppServerOutputsVerified Condition="Exists('$(_CodexAppServerExecutablePath)') And Exists('$(_CodexAppServerManifestPath)') And '$(_CodexAppServerOutputExecutableSha256)' == '$(_CodexAppServerExpectedExecutableSha256)' And '@(_CodexAppServerOutputManifestLines)' == '$(_CodexAppServerManifestContent)'">true</_CodexAppServerOutputsVerified>
+    </PropertyGroup>
+    <Delete
+      Files="$(_CodexAppServerExecutablePath);$(_CodexAppServerManifestPath)"
+      Condition="'$(_CodexAppServerOutputsVerified)' != 'true' And (Exists('$(_CodexAppServerExecutablePath)') Or Exists('$(_CodexAppServerManifestPath)'))"
+    />
+    <GetFileHash Files="$(CodexAppServerZipPath)" Algorithm="SHA256" HashEncoding="hex" Condition="Exists('$(CodexAppServerZipPath)')">
+      <Output TaskParameter="Hash" PropertyName="_CodexAppServerArchiveSha256" />
+    </GetFileHash>
+    <Error
+      Condition="Exists('$(CodexAppServerZipPath)') And '$(_CodexAppServerArchiveSha256)' != '$(_CodexAppServerExpectedArchiveSha256)'"
+      Text="Codex app-server archive SHA-256 does not match the pinned release."
+    />
+    <WriteLinesToFile
+      File="$(_CodexAppServerManifestPath)"
+      Lines="$(_CodexAppServerManifestContent)"
+      Overwrite="true"
+      Condition="'$(_CodexAppServerOutputsVerified)' == 'true'"
+    />
+    <Message
+      Importance="High"
+      Condition="'$(_CodexAppServerOutputsVerified)' == 'true'"
+      Text="The existing Codex app-server output matches the pinned binary package; extraction was skipped."
+    />
+  </Target>
+
+  <Target
+    Name="StageVerifiedCodexAppServer"
+    AfterTargets="Build"
+    DependsOnTargets="VerifyCodexAppServerBuildInputs"
+    Inputs="$(CodexAppServerZipPath);$(_CodexAppServerVerifierPath)"
+    Outputs="$(TargetDir)tools\codex-app-server\0.162.1\codex-app-server-x86_64-pc-windows-msvc.exe;$(TargetDir)tools\codex-app-server\0.162.1\codex-app-server.manifest.json"
+    Condition="Exists('$(CodexAppServerZipPath)') And '$(_CodexAppServerOutputsVerified)' != 'true'"
+  >
+    <RemoveDir Directories="$(_CodexAppServerExtractionDirectory)" Condition="Exists('$(_CodexAppServerExtractionDirectory)')" />
+    <MakeDir Directories="$(_CodexAppServerExtractionDirectory)" />
+    <Unzip SourceFiles="$(CodexAppServerZipPath)" DestinationFolder="$(_CodexAppServerExtractionDirectory)" SkipUnchangedFiles="false" />
+    <ItemGroup>
+      <_CodexAppServerExecutable Include="$(_CodexAppServerExtractionDirectory)**\codex-app-server-x86_64-pc-windows-msvc.exe" />
+    </ItemGroup>
+    <Error
+      Condition="'@(_CodexAppServerExecutable->Count())' != '1'"
+      Text="The Codex app-server archive must contain exactly one pinned executable."
+    />
+    <GetFileHash Files="@(_CodexAppServerExecutable)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Hash" PropertyName="_CodexAppServerExecutableSha256" />
+    </GetFileHash>
+    <Error
+      Condition="'$(_CodexAppServerExecutableSha256)' != '$(_CodexAppServerExpectedExecutableSha256)'"
+      Text="Extracted Codex app-server executable SHA-256 does not match the pinned release."
+    />
+    <MakeDir Directories="$(_CodexAppServerOutputDirectory)" />
+    <Copy
+      SourceFiles="@(_CodexAppServerExecutable)"
+      DestinationFiles="$(_CodexAppServerExecutablePath)"
+      SkipUnchangedFiles="true"
+    />
+    <WriteLinesToFile
+      File="$(_CodexAppServerManifestPath)"
+      Lines="$(_CodexAppServerManifestContent)"
+      Overwrite="true"
+    />
+    <RemoveDir Directories="$(_CodexAppServerExtractionDirectory)" Condition="Exists('$(_CodexAppServerExtractionDirectory)')" />
+    <OnError ExecuteTargets="CleanCodexAppServerExtraction" />
+  </Target>
+
+  <Target Name="CleanCodexAppServerExtraction">
+    <RemoveDir Directories="$(_CodexAppServerExtractionDirectory)" Condition="Exists('$(_CodexAppServerExtractionDirectory)')" />
+  </Target>
+
+  <Target
+    Name="ReportMissingCodexAppServerArchive"
+    AfterTargets="Build"
+    DependsOnTargets="VerifyCodexAppServerBuildInputs"
+    Condition="!Exists('$(CodexAppServerZipPath)')"
+  >
+    <Delete Files="$(_CodexAppServerExecutablePath);$(_CodexAppServerManifestPath)" />
+    <Message
+      Importance="High"
+      Text="The Codex app-server archive was not found; no app-server was staged and Codex login is unavailable in this build. Path: $(CodexAppServerZipPath)"
+    />
+  </Target>
+</Project>

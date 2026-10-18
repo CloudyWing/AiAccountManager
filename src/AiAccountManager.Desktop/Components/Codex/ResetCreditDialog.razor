@@ -1,0 +1,33 @@
+<MudDialog Visible="@Visible" VisibleChanged="VisibleChanged" Options="@Options">
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h6">確認使用重置券</MudText>
+            <MudText>5 小時：@Describe(Snapshot?.FiveHour)</MudText>
+            <MudText>每週：@Describe(Snapshot?.Weekly)</MudText>
+            @if (CreditId is null) {
+                <MudText>重置券由系統挑選</MudText>
+            }
+            <MudAlert Severity="Severity.Warning">使用後週期會重新計算，原本的重置時間會延後</MudAlert>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Primary" Disabled="@Busy" OnClick="OnConfirm">@(Busy ? "處理中…" : "確認使用")</MudButton>
+        <MudButton Disabled="@Busy" OnClick="OnCancel">取消</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions Options = new() { CloseButton = false, BackdropClick = false, MaxWidth = MaxWidth.Small, FullWidth = true };
+
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    [Parameter] public QuotaSuccessfulSnapshot? Snapshot { get; set; }
+    [Parameter] public string? CreditId { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private static string Describe(QuotaWindow? window) {
+        return window is null ? "未知" : $"已用 {100 - window.RemainingPercent}%・原重置時間 {(window.ResetsAtUtc.HasValue ? TaiwanTimeUtils.Format(window.ResetsAtUtc.Value) : "未知")}";
+    }
+}

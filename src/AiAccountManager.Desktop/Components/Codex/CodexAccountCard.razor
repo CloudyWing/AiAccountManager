@@ -1,0 +1,281 @@
+@using CloudyWing.AiAccountManager.Application.Accounts
+@using CloudyWing.AiAccountManager.Desktop.Components
+
+<MudPaper Elevation="0" Outlined="true" Class="@CardClass" data-provider="codex">
+    <div class="account-card-summary">
+        <div class="account-card-heading">
+            <AccountAvatar DisplayName="@DisplayName" Provider="codex" />
+            <div class="account-card-identity">
+                <div class="account-card-title">
+                    <MudText Typo="Typo.h6">@DisplayName</MudText>
+                    @if (IsLocallyMatched) {
+                        <MudChip T="string" Color="Color.Success" Variant="Variant.Text" Size="Size.Small">符合本機登入資料</MudChip>
+                    }
+                </div>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">身分：@Account.MaskedIdentity</MudText>
+            </div>
+            <div class="account-card-actions">
+                <MudChip T="string" Color="@StatusColor" Variant="Variant.Outlined" Size="Size.Small">@StatusText</MudChip>
+                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
+                               Color="Color.Default"
+                               Disabled="@(!CanMoveUp || Busy)"
+                               title="@MoveUpTitle"
+                               aria-label="@MoveUpAriaLabel"
+                               OnClick="MoveUpAsync" />
+                <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward"
+                               Color="Color.Default"
+                               Disabled="@(!CanMoveDown || Busy)"
+                               title="@MoveDownTitle"
+                               aria-label="@MoveDownAriaLabel"
+                               OnClick="MoveDownAsync" />
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                               Color="Color.Primary"
+                               Disabled="@(!CanRefresh)"
+                               title="@RefreshTitle"
+                               aria-label="@RefreshTitle"
+                               OnClick="RefreshAsync" />
+                <MudIconButton Icon="@ExpandIcon"
+                               Color="Color.Default"
+                               aria-expanded="@expanded"
+                               aria-label="@(expanded ? $"收合 {DisplayName} 詳細資料" : $"展開 {DisplayName} 詳細資料")"
+                               OnClick="ToggleExpanded" />
+            </div>
+        </div>
+
+        @if (Quota?.Snapshot?.LastSuccessfulSnapshot is QuotaSuccessfulSnapshot success) {
+            <div class="account-quota-grid">
+                <QuotaBar Label="5 小時"
+                          RemainingPercent="@success.FiveHour.RemainingPercent"
+                          ResetText="@FormatReset(success.FiveHour.ResetsAtUtc)" />
+                <QuotaBar Label="每週"
+                          RemainingPercent="@success.Weekly.RemainingPercent"
+                          ResetText="@FormatReset(success.Weekly.ResetsAtUtc)" />
+            </div>
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">@QuotaUpdatedAtFormatter.Format(success.RetrievedAtUtc, DateTimeOffset.UtcNow)</MudText>
+            @if (success.ResetCredits is ResetCreditSummary credits) {
+                <MudText Typo="Typo.body2">重置券 @credits.AvailableCount 張・@CreditExpiry(credits)</MudText>
+                <details>
+                    <summary>重置券明細</summary>
+                    @foreach (ResetCredit credit in credits.Credits ?? []) {
+                        <MudText Typo="Typo.body2" Color="@(IsExpiring(credit.ExpiresAtUtc) ? Color.Warning : Color.Default)">
+                            @(credit.Title ?? credit.Id)・@(credit.ExpiresAtUtc is DateTimeOffset expiry ? TaiwanTimeUtils.Format(expiry) : "無期限")
+                        </MudText>
+                    }
+                    @if (credits.AvailableCount > (credits.Credits?.Count ?? 0)) {
+                        <MudText Typo="Typo.caption">另有 @(credits.AvailableCount - (credits.Credits?.Count ?? 0)) 張未列出明細</MudText>
+                    }
+                </details>
+                <MudButton Variant="Variant.Outlined" Disabled="@(Busy || credits.AvailableCount <= 0 || CreditRefreshRequired)" OnClick="UseCreditAsync">使用重置券</MudButton>
+                @if (CreditRefreshRequired) {
+                    <MudText Typo="Typo.caption">請先刷新額度，再決定是否使用重置券。</MudText>
+                } else if (credits.AvailableCount == 0) {
+                    <MudText Typo="Typo.caption">沒有可用重置券</MudText>
+                }
+            } else {
+                <MudText Typo="Typo.body2">重置券：未知</MudText>
+                <MudButton Variant="Variant.Outlined" Disabled="true">使用重置券</MudButton>
+            }
+        } else if (Quota?.Status == QuotaDisplayStatus.Refreshing) {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">正在讀取額度；完成後會更新此摘要。</MudText>
+        } else {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">尚無成功額度快照；未知額度不以 0% 顯示。</MudText>
+            <MudText Typo="Typo.body2">重置券：未知</MudText>
+            <MudButton Variant="Variant.Outlined" Disabled="true">使用重置券</MudButton>
+        }
+
+        @if (LastAutoUse is not null) {
+            <MudText Typo="Typo.body2">上次自動使用：@TaiwanTimeUtils.Format(LastAutoUse.AttemptedAtUtc)・@AutoUseResult(LastAutoUse.Result)</MudText>
+        }
+
+        <div class="account-primary-actions">
+            @if (!string.IsNullOrWhiteSpace(SwitchDisabledReason) && !IsLocallyMatched) {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary account-disabled-reason">@SwitchDisabledReason</MudText>
+            }
+            <MudButton Color="Color.Primary"
+                       Variant="Variant.Filled"
+                       StartIcon="@Icons.Material.Filled.SwapHoriz"
+                       Disabled="@(Busy || !CanSwitch)"
+                       OnClick="SwitchAsync">
+                @(IsSwitching ? "正在切換…" : IsLocallyMatched ? "目前 Desktop 帳號" : "切換至此帳號")
+            </MudButton>
+        </div>
+    </div>
+
+    @if (expanded) {
+        <div class="account-card-details">
+            @if (Quota?.Snapshot?.LastSuccessfulSnapshot is QuotaSuccessfulSnapshot details) {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    最後成功更新：@details.RetrievedAtUtc.ToLocalTime().ToString("yyyy/MM/dd HH:mm", CultureInfo.CurrentCulture)
+                    @if (Quota?.IsStale == true) {
+                        <span> · 顯示的是舊快照</span>
+                    }
+                </MudText>
+            }
+
+            <div class="account-alias-row">
+                <MudTextField T="string" Label="帳號別名" Value="@AliasValue" ValueChanged="AliasChangedAsync" Immediate="true" Disabled="@Busy" />
+                <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@Busy" OnClick="SaveAliasAsync">保存別名</MudButton>
+            </div>
+            <div class="account-danger-row">
+                <MudButton Color="Color.Error" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.DeleteOutline" Disabled="@Busy" OnClick="RemoveAsync">移除此帳號</MudButton>
+            </div>
+        </div>
+    }
+</MudPaper>
+
+@code {
+    private bool expanded;
+
+    [Parameter, EditorRequired]
+    public CodexAccountProfile Account { get; set; } = null!;
+
+    [Parameter]
+    public QuotaSnapshotView? Quota { get; set; }
+
+    [Parameter]
+    public string? AliasValue { get; set; }
+
+    [Parameter]
+    public EventCallback<string?> AliasValueChanged { get; set; }
+
+    [Parameter]
+    public bool Busy { get; set; }
+
+    [Parameter]
+    public bool CreditRefreshRequired { get; set; }
+
+    [Parameter]
+    public CloudyWing.AiAccountManager.Application.Codex.CodexResetCreditAttempt? LastAutoUse { get; set; }
+
+    [Parameter]
+    public bool IsLocallyMatched { get; set; }
+
+    [Parameter]
+    public bool CanMoveUp { get; set; }
+
+    [Parameter]
+    public bool CanMoveDown { get; set; }
+
+    [Parameter]
+    public EventCallback<Guid> OnSaveAlias { get; set; }
+
+    [Parameter]
+    public EventCallback<Guid> OnRefresh { get; set; }
+
+    [Parameter]
+    public EventCallback<Guid> OnUseCredit { get; set; }
+
+    [Parameter]
+    public EventCallback<Guid> OnRemove { get; set; }
+
+    [Parameter]
+    public EventCallback<Guid> OnMoveUp { get; set; }
+
+    [Parameter]
+    public EventCallback<Guid> OnMoveDown { get; set; }
+
+    [Parameter]
+    public bool CanSwitch { get; set; }
+
+    [Parameter]
+    public string? SwitchDisabledReason { get; set; }
+
+    [Parameter]
+    public bool IsSwitching { get; set; }
+
+    [Parameter]
+    public EventCallback<Guid> OnSwitch { get; set; }
+
+    private string CardClass => IsLocallyMatched
+        ? "content-card account-card codex-account-card is-current"
+        : "content-card account-card codex-account-card";
+
+    private bool CanRefresh =>!Busy && Quota?.Status != QuotaDisplayStatus.Refreshing;
+
+    private string DisplayName => string.IsNullOrWhiteSpace(Account.Alias) ? Account.MaskedIdentity : Account.Alias;
+
+    private string MoveUpTitle => CanMoveUp ? "上移帳號" : "目前已是第一個帳號，無法上移。";
+
+    private string MoveDownTitle => CanMoveDown ? "下移帳號" : "目前已是最後一個帳號，無法下移。";
+
+    private string MoveUpAriaLabel => $"上移 {DisplayName}";
+
+    private string MoveDownAriaLabel => $"下移 {DisplayName}";
+
+    private string RefreshTitle => $"刷新 {DisplayName} 額度";
+
+    private string ExpandIcon => expanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore;
+
+    private string StatusText => Quota?.Status switch {
+        QuotaDisplayStatus.Refreshing => "刷新中",
+        QuotaDisplayStatus.Fresh => "最新",
+        QuotaDisplayStatus.Stale => "舊值",
+        QuotaDisplayStatus.ReauthenticationRequired => "需要重新登入",
+        QuotaDisplayStatus.Error => "讀取失敗",
+        QuotaDisplayStatus.Incomplete => "回應不完整",
+        _ => "尚未讀取"
+    };
+
+    private Color StatusColor => Quota?.Status switch {
+        QuotaDisplayStatus.Fresh => Color.Success,
+        QuotaDisplayStatus.Stale or QuotaDisplayStatus.Incomplete => Color.Warning,
+        QuotaDisplayStatus.ReauthenticationRequired or QuotaDisplayStatus.Error => Color.Error,
+        QuotaDisplayStatus.Refreshing => Color.Info,
+        _ => Color.Default
+    };
+
+    private Task AliasChangedAsync(string? value) => AliasValueChanged.InvokeAsync(value);
+
+    private Task SaveAliasAsync() => OnSaveAlias.InvokeAsync(Account.AccountId);
+
+    private Task RefreshAsync() => OnRefresh.InvokeAsync(Account.AccountId);
+
+    private Task UseCreditAsync() => OnUseCredit.InvokeAsync(Account.AccountId);
+
+    private static string AutoUseResult(string result) => result switch {
+        "reset" => "重置成功",
+        "resetRefreshFailed" => "重置成功，額度刷新失敗",
+        "nothingToReset" => "目前沒有可重置的視窗",
+        "noCredit" => "沒有可用重置券",
+        "alreadyRedeemed" => "此操作已完成重置",
+        "pending" or "unconfirmed" => "結果未確認",
+        "cancelled" => "已取消（未送出）",
+        _ => "使用失敗"
+    };
+
+    private static bool IsExpiring(DateTimeOffset? expiry) {
+        TimeSpan? remaining = expiry - DateTimeOffset.UtcNow;
+        return remaining >= TimeSpan.Zero && remaining <= TimeSpan.FromDays(7);
+    }
+
+    private static string CreditExpiry(ResetCreditSummary summary) {
+        ResetCredit[] available = (summary.Credits ?? []).Where(credit => credit.Status == "available").ToArray();
+        DateTimeOffset? earliest = available.Where(credit => credit.ExpiresAtUtc.HasValue)
+            .Select(credit => credit.ExpiresAtUtc).Min();
+        if (earliest.HasValue) {
+            return (summary.AvailableCount > (summary.Credits?.Count ?? 0) ? "已列明細最近到期 " : "最近到期 ")
+                + TaiwanTimeUtils.Format(earliest.Value);
+        }
+
+        return available.Length > 0 ? "無期限" : "到期時間未知";
+    }
+
+    private Task RemoveAsync() => OnRemove.InvokeAsync(Account.AccountId);
+
+    private Task SwitchAsync() => Busy || !CanSwitch ? Task.CompletedTask : OnSwitch.InvokeAsync(Account.AccountId);
+
+    private Task MoveUpAsync() => OnMoveUp.InvokeAsync(Account.AccountId);
+
+    private Task MoveDownAsync() => OnMoveDown.InvokeAsync(Account.AccountId);
+
+    private void ToggleExpanded() {
+        expanded = !expanded;
+    }
+
+    private static string FormatReset(DateTimeOffset? resetAt) {
+        return resetAt is DateTimeOffset value
+            ? value.ToLocalTime().ToString("yyyy/MM/dd HH:mm", CultureInfo.CurrentCulture)
+            : "重置時間未知";
+    }
+}

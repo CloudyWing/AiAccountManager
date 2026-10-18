@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AiAccountManager.Application/AiAccountManager.Application.csproj" />
+    <Project Path="src/AiAccountManager.Desktop/AiAccountManager.Desktop.csproj" />
+    <Project Path="src/AiAccountManager.Windows/AiAccountManager.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AiAccountManager.Tests/AiAccountManager.Tests.csproj" />
+  </Folder>
+</Solution>

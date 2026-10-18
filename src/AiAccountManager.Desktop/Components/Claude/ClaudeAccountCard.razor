@@ -1,0 +1,342 @@
+@using CloudyWing.AiAccountManager.Desktop.Components
+
+<MudPaper Elevation="0" Outlined="true" Class="@CardClass" data-provider="claude">
+    <div class="account-card-summary">
+        <div class="account-card-heading">
+            <AccountAvatar DisplayName="@DisplayName" Provider="claude" />
+            <div class="account-card-identity">
+                <div class="account-card-title">
+                    <MudText Typo="Typo.h6">@DisplayName</MudText>
+                    @if (IsCurrentDesktopProfile) {
+                        <MudChip T="string" Color="Color.Success" Variant="Variant.Text" Size="Size.Small">目前 Desktop 帳號</MudChip>
+                    }
+                    @if (IsSelectedForSwitch) {
+                        <MudChip T="string" Color="Color.Primary" Variant="Variant.Text" Size="Size.Small">切換目標</MudChip>
+                    }
+                </div>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">身分：@MaskedIdentity</MudText>
+            </div>
+            <div class="account-card-actions">
+                @if (!string.IsNullOrWhiteSpace(IdentityStatusText)) {
+                    <MudChip T="string" Color="@IdentityStatusColor" Variant="Variant.Outlined" Size="Size.Small">@IdentityStatusText</MudChip>
+                }
+                @if (!string.IsNullOrWhiteSpace(QuotaStatusText)) {
+                    <MudChip T="string" Color="@QuotaStatusColor" Variant="Variant.Outlined" Size="Size.Small">額度：@QuotaStatusText</MudChip>
+                }
+                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
+                               Color="Color.Default"
+                               Disabled="@(!CanMoveUp || !CanEditCatalog || IsBusy)"
+                               title="@(CanMoveUp ? "上移帳號" : "目前已是第一個帳號，無法上移。")"
+                               aria-label="@($"上移 {DisplayName}")"
+                               OnClick="MoveUpAsync" />
+                <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward"
+                               Color="Color.Default"
+                               Disabled="@(!CanMoveDown || !CanEditCatalog || IsBusy)"
+                               title="@(CanMoveDown ? "下移帳號" : "目前已是最後一個帳號，無法下移。")"
+                               aria-label="@($"下移 {DisplayName}")"
+                               OnClick="MoveDownAsync" />
+                <MudIconButton Icon="@ExpandIcon"
+                               Color="Color.Default"
+                               aria-expanded="@expanded"
+                               aria-label="@(expanded ? $"收合 {DisplayName} 詳細資料" : $"展開 {DisplayName} 詳細資料")"
+                               OnClick="ToggleExpanded" />
+            </div>
+        </div>
+
+        @if (IsQuotaLoading) {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">正在查詢此帳號的額度。</MudText>
+        }
+
+        @if (QuotaWindows.Count > 0) {
+            <div class="account-quota-grid">
+                @foreach (ClaudeQuotaSnapshot.Window window in QuotaWindows) {
+                    <QuotaBar Label="@GetWindowLabel(window)"
+                              RemainingPercent="@GetRemainingPercent(window)"
+                              ResetText="@(FormatResetTime(window.ResetsAtUtc) ?? "未知")" />
+                }
+            </div>
+        }
+
+        @if (ResetGrants is not null) {
+            @foreach (ClaudeResetGrant grant in ResetGrants) {
+                <MudText Typo="Typo.body2" Color="@(IsExpiring(grant.EndsAtUtc) ? Color.Warning : Color.Default)">
+                    @grant.Label：@grant.ResetsLeft / @grant.ResetsTotal・@GrantTime(grant.StartsAtUtc) ～ @GrantTime(grant.EndsAtUtc)・@GrantStatus(grant)
+                </MudText>
+            }
+        }
+
+        @if (QuotaUpdatedAtFormatter.Format(QuotaUpdatedAt, DateTimeOffset.UtcNow) is string updatedAtText) {
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">@updatedAtText</MudText>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(QuotaMessage)) {
+            <MudAlert Severity="@QuotaMessageSeverity" Variant="Variant.Outlined" Dense="true">@QuotaMessage</MudAlert>
+        } else if (QuotaWindows.Count == 0 && !IsQuotaLoading) {
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">尚未取得此帳號的額度快照。</MudText>
+        }
+
+        <div class="account-primary-actions">
+            @if (!string.IsNullOrWhiteSpace(SwitchDisabledReason)) {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary account-disabled-reason">@SwitchDisabledReason</MudText>
+            }
+            <MudButton Variant="Variant.Text"
+                       StartIcon="@Icons.Material.Filled.Refresh"
+                       Disabled="@(IsBusy || !CanRefreshQuota)"
+                       OnClick="RefreshQuotaAsync">
+                @(IsQuotaLoading ? "正在查詢…" : "查詢額度")
+            </MudButton>
+            <MudButton Color="Color.Primary"
+                       Variant="Variant.Filled"
+                       StartIcon="@Icons.Material.Filled.SwapHoriz"
+                       Disabled="@(IsBusy || !CanRequestSwitch)"
+                       OnClick="RequestSwitchAsync">
+                @(IsSelectedForSwitch ? "檢視切換內容" : "切換至此帳號")
+            </MudButton>
+        </div>
+    </div>
+
+    @if (expanded) {
+        <div class="account-card-details">
+            <dl class="account-detail-list">
+                @if (!string.IsNullOrWhiteSpace(OrganizationDisplayName)) {
+                    <div>
+                        <dt>組織</dt>
+                        <dd>@OrganizationDisplayName</dd>
+                    </div>
+                }
+                @if (!string.IsNullOrWhiteSpace(IdentityEvidenceText)) {
+                    <div>
+                        <dt>身分證據</dt>
+                        <dd>@IdentityEvidenceText</dd>
+                    </div>
+                }
+                @if (!string.IsNullOrWhiteSpace(QuotaSourceText)) {
+                    <div>
+                        <dt>額度查詢來源</dt>
+                        <dd>@QuotaSourceText</dd>
+                    </div>
+                }
+                @if (!string.IsNullOrWhiteSpace(QuotaCheckedAtText)) {
+                    <div>
+                        <dt>額度時間</dt>
+                        <dd>@QuotaCheckedAtText</dd>
+                    </div>
+                }
+            </dl>
+
+            <div class="account-alias-row">
+                <MudTextField T="string"
+                              Label="帳號別名"
+                              MaxLength="80"
+                              Value="@aliasDraft"
+                              ValueChanged="SetAliasDraft"
+                              Immediate="true"
+                              Disabled="@(IsBusy || !CanEditCatalog)" />
+                <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(IsBusy || !CanEditCatalog)" OnClick="SaveAliasAsync">保存別名</MudButton>
+            </div>
+            <div class="account-danger-row">
+                @if (!CanEditCatalog && !string.IsNullOrWhiteSpace(CatalogDisabledReason)) {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">@CatalogDisabledReason</MudText>
+                }
+                <MudButton Color="Color.Error"
+                           Variant="Variant.Text"
+                           StartIcon="@Icons.Material.Outlined.DeleteOutline"
+                           Disabled="@(IsBusy || !CanEditCatalog)"
+                           OnClick="RemoveAsync">
+                    移除此帳號
+                </MudButton>
+            </div>
+        </div>
+    }
+</MudPaper>
+
+@code {
+    private bool expanded;
+    private string? aliasDraft;
+    private string? lastAlias;
+
+    [Parameter, EditorRequired]
+    public string DisplayName { get; set; } = null!;
+
+    [Parameter, EditorRequired]
+    public string MaskedIdentity { get; set; } = null!;
+
+    [Parameter]
+    public string? Alias { get; set; }
+
+    [Parameter]
+    public string? OrganizationDisplayName { get; set; }
+
+    [Parameter]
+    public string? IdentityEvidenceText { get; set; }
+
+    [Parameter]
+    public string? IdentityStatusText { get; set; }
+
+    [Parameter]
+    public Color IdentityStatusColor { get; set; } = Color.Default;
+
+    [Parameter]
+    public bool IsCurrentDesktopProfile { get; set; }
+
+    [Parameter]
+    public bool IsSelectedForSwitch { get; set; }
+
+    [Parameter]
+    public bool IsBusy { get; set; }
+
+    [Parameter]
+    public string? QuotaStatusText { get; set; }
+
+    [Parameter]
+    public Color QuotaStatusColor { get; set; } = Color.Default;
+
+    [Parameter]
+    public bool IsQuotaLoading { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<ClaudeQuotaSnapshot.Window> QuotaWindows { get; set; } = Array.Empty<ClaudeQuotaSnapshot.Window>();
+
+    [Parameter]
+    public IReadOnlyList<ClaudeResetGrant>? ResetGrants { get; set; }
+
+    [Parameter]
+    public Severity QuotaMessageSeverity { get; set; } = Severity.Info;
+
+    [Parameter]
+    public string? QuotaMessage { get; set; }
+
+    [Parameter]
+    public string? QuotaSourceText { get; set; }
+
+    [Parameter]
+    public string? QuotaCheckedAtText { get; set; }
+
+    [Parameter]
+    public DateTimeOffset? QuotaUpdatedAt { get; set; }
+
+    [Parameter]
+    public bool CanRefreshQuota { get; set; }
+
+    [Parameter]
+    public bool CanRequestSwitch { get; set; }
+
+    [Parameter]
+    public string? SwitchDisabledReason { get; set; }
+
+    [Parameter]
+    public bool CanMoveUp { get; set; }
+
+    [Parameter]
+    public bool CanMoveDown { get; set; }
+
+    [Parameter]
+    public bool CanEditCatalog { get; set; } = true;
+
+    [Parameter]
+    public string? CatalogDisabledReason { get; set; }
+
+    [Parameter]
+    public EventCallback OnRefreshQuota { get; set; }
+
+    [Parameter]
+    public EventCallback OnRequestSwitch { get; set; }
+
+    [Parameter]
+    public EventCallback<string?> OnSaveAlias { get; set; }
+
+    [Parameter]
+    public EventCallback OnMoveUp { get; set; }
+
+    [Parameter]
+    public EventCallback OnMoveDown { get; set; }
+
+    [Parameter]
+    public EventCallback OnRemove { get; set; }
+
+    private string CardClass => IsCurrentDesktopProfile
+        ? "content-card account-card claude-account-card is-current"
+        : "content-card account-card claude-account-card";
+
+    private string ExpandIcon => expanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore;
+
+    protected override void OnParametersSet() {
+        if (!string.Equals(lastAlias, Alias, StringComparison.Ordinal)) {
+            lastAlias = Alias;
+            aliasDraft = Alias;
+        }
+    }
+
+    private static double GetRemainingPercent(ClaudeQuotaSnapshot.Window window) {
+        return (double)Math.Clamp(100m - window.UtilizationPercent, 0m, 100m);
+    }
+
+    private static string GetWindowLabel(ClaudeQuotaSnapshot.Window window) {
+        return window.Key switch {
+            "session" => "5 小時",
+            "weekly_all" => "每週（全部）",
+            _ when window.Key.StartsWith("weekly_scoped:", StringComparison.Ordinal)
+                => $"每週（{window.Key["weekly_scoped:".Length..]}）",
+            _ => $"額度視窗（{window.Key}）"
+        };
+    }
+
+    private static string? FormatResetTime(DateTimeOffset? resetAtUtc) {
+        return resetAtUtc?.ToLocalTime().ToString("yyyy/MM/dd HH:mm", CultureInfo.CurrentCulture);
+    }
+
+    private static string GrantTime(DateTimeOffset? value) => value.HasValue ? TaiwanTimeUtils.Format(value.Value) : "未指定";
+
+    private static string GrantStatus(ClaudeResetGrant grant) => grant.IsPaused ? "已暫停"
+        : grant.IsUsableNow ? "可使用" : grant.UseRequiresLimit ? "需達上限才能用" : "目前不可使用";
+
+    private static bool IsExpiring(DateTimeOffset? value) {
+        TimeSpan? remaining = value - DateTimeOffset.UtcNow;
+        return remaining >= TimeSpan.Zero && remaining <= TimeSpan.FromDays(7);
+    }
+
+    private void ToggleExpanded() {
+        expanded = !expanded;
+    }
+
+    private void SetAliasDraft(string? value) {
+        aliasDraft = value;
+    }
+
+    private Task RefreshQuotaAsync() {
+        return IsBusy || !CanRefreshQuota
+            ? Task.CompletedTask
+            : OnRefreshQuota.InvokeAsync();
+    }
+
+    private Task RequestSwitchAsync() {
+        return IsBusy || !CanRequestSwitch
+            ? Task.CompletedTask
+            : OnRequestSwitch.InvokeAsync();
+    }
+
+    private Task SaveAliasAsync() {
+        return IsBusy || !CanEditCatalog
+            ? Task.CompletedTask
+            : OnSaveAlias.InvokeAsync(aliasDraft);
+    }
+
+    private Task MoveUpAsync() {
+        return IsBusy || !CanEditCatalog || !CanMoveUp
+            ? Task.CompletedTask
+            : OnMoveUp.InvokeAsync();
+    }
+
+    private Task MoveDownAsync() {
+        return IsBusy || !CanEditCatalog || !CanMoveDown
+            ? Task.CompletedTask
+            : OnMoveDown.InvokeAsync();
+    }
+
+    private Task RemoveAsync() {
+        return IsBusy || !CanEditCatalog
+            ? Task.CompletedTask
+            : OnRemove.InvokeAsync();
+    }
+}

@@ -1,0 +1,61 @@
+<MudDialog Visible="@Visible" VisibleChanged="VisibleChanged" Options="@DialogOptions" Class="codex-remove-account-dialog" ActionsClass="aam-dialog-actions">
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h6">確認移除 Codex 額度帳號</MudText>
+            @if (Account is not null) {
+                <MudText Typo="Typo.subtitle1">@(string.IsNullOrWhiteSpace(Account.Alias) ? Account.MaskedIdentity : Account.Alias)</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">身分：@Account.MaskedIdentity</MudText>
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                    確認後會移除此額度 profile，並清除此 profile 專屬的 Codex keyring 認證與 CODEX_HOME。
+                </MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Error" Variant="Variant.Text" Disabled="@Busy" OnClick="ConfirmAsync">
+            @(Busy ? "正在移除…" : "確認移除")
+        </MudButton>
+        <MudButton Variant="Variant.Text" Disabled="@Busy" OnClick="CancelAsync">取消</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter]
+    public bool Visible { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> VisibleChanged { get; set; }
+
+    [Parameter, EditorRequired]
+    public CodexAccountProfile? Account { get; set; }
+
+    [Parameter]
+    public bool Busy { get; set; }
+
+    [Parameter]
+    public EventCallback<Guid> OnConfirm { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private static readonly DialogOptions DialogOptions = new() {
+        CloseButton = false,
+        CloseOnEscapeKey = true,
+        BackdropClick = false,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true
+    };
+
+    private async Task ConfirmAsync() {
+        if (!Busy && Account is not null) {
+            await OnConfirm.InvokeAsync(Account.AccountId);
+        }
+    }
+
+    private async Task CancelAsync() {
+        if (!Busy) {
+            await OnCancel.InvokeAsync();
+            await VisibleChanged.InvokeAsync(false);
+        }
+    }
+}

@@ -1,0 +1,9 @@
+{
+  "oauth:tokenCache": {
+    "accessToken": "token-org-a"
+  },
+  "oauth:tokenCacheV2": {
+    "access_token": "token-org-b"
+  },
+  "lastKnownAccountUuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+}

@@ -1,0 +1,463 @@
+@page "/"
+@using CloudyWing.AiAccountManager.Desktop.Components.Dashboard
+@implements IAsyncDisposable
+@inject IDashboardOverviewReader OverviewReader
+@inject ClaudeQuotaService ClaudeQuotas
+@inject CodexQuotaService CodexQuotas
+@using CloudyWing.AiAccountManager.Application.Recommendations
+
+<PageTitle>儀表板</PageTitle>
+
+<MudStack Spacing="4" Class="page-stack dashboard-page">
+    <div class="dashboard-heading">
+        <MudText Typo="Typo.h4">儀表板</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            Claude 與 Codex 的目前身分、剩餘額度與異常分別呈現。
+        </MudText>
+    </div>
+
+    @if (isLoading) {
+        <div class="dashboard-loading-summary" role="status" aria-live="polite">
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            <MudText Typo="Typo.body2">正在分別讀取 Claude 與 Codex 額度。</MudText>
+        </div>
+    }
+
+    <section class="dashboard-service-grid" aria-label="目前帳號與剩餘額度">
+        @foreach (DashboardOverviewSnapshot.ProviderKind kind in providerKinds) {
+            @if (GetProvider(kind) is DashboardOverviewSnapshot.Provider provider) {
+                <MudPaper Elevation="0"
+                          Outlined="true"
+                          Class="content-card dashboard-service-card"
+                          data-provider="@ProviderKey(provider.Kind)">
+                    <header class="dashboard-service-heading">
+                        <div class="dashboard-service-identity">
+                            <div class="dashboard-service-title">
+                                <AccountAvatar DisplayName="@ProviderTitle(provider.Kind)" Provider="@ProviderKey(provider.Kind)" IconOnly="true" />
+                                <MudText Typo="Typo.h5">@ProviderTitle(provider.Kind)</MudText>
+                            </div>
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                                身分：@(string.IsNullOrWhiteSpace(provider.MaskedIdentity) ? "未知" : provider.MaskedIdentity)
+                            </MudText>
+                        </div>
+                        <div class="dashboard-status-chips">
+                            <MudChip T="string"
+                                     Color="@IdentityColor(provider.IdentityStatus)"
+                                     Variant="Variant.Outlined">
+                                @IdentityStatusText(provider.IdentityStatus)
+                            </MudChip>
+                            <MudChip T="string"
+                                     Color="@QuotaColor(provider.QuotaStatus)"
+                                     Variant="Variant.Outlined">
+                                @QuotaStatusText(provider.QuotaStatus)
+                            </MudChip>
+                        </div>
+                    </header>
+
+                    @if (!string.IsNullOrWhiteSpace(provider.IdentityMessage)) {
+                        <MudAlert Severity="@IdentitySeverity(provider.IdentityStatus)" Variant="Variant.Outlined">
+                            @provider.IdentityMessage
+                        </MudAlert>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(provider.QuotaMessage)) {
+                        <MudAlert Severity="@QuotaSeverity(provider.QuotaStatus)" Variant="Variant.Outlined">
+                            @provider.QuotaMessage
+                        </MudAlert>
+                    }
+
+                    @if (provider.Windows.Count > 0) {
+                        <div class="dashboard-window-grid">
+                            @foreach (DashboardOverviewSnapshot.QuotaWindow window in provider.Windows) {
+                                <section class="dashboard-quota-window" aria-label="@WindowAccessibleName(window)">
+                                    <MudText Typo="Typo.subtitle2">@window.Label</MudText>
+                                    @if (!string.IsNullOrWhiteSpace(window.Scope)) {
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">範圍：@window.Scope</MudText>
+                                    }
+
+                                    <div class="dashboard-ring-wrap">
+                                        @if (window.RemainingPercent is decimal remaining
+                                            && remaining is >= 0m and <= 100m) {
+                                            <MudProgressCircular Value="@ToRingValue(remaining)"
+                                                                 Color="@QuotaLevel.ForRemaining(ToRingValue(remaining))"
+                                                                 Size="Size.Large"
+                                                                 StrokeWidth="5"
+                                                                 Class="dashboard-quota-ring"
+                                                                 aria-label="@RingAccessibleName(window, remaining)">
+                                                @FormatPercent(remaining)%
+                                            </MudProgressCircular>
+                                            <MudText Typo="Typo.body2">剩餘額度・@QuotaLevel.TextForRemaining(ToRingValue(remaining))</MudText>
+                                        } else {
+                                            <div class="dashboard-quota-unknown" role="img" aria-label="@UnknownRingLabel(window)">
+                                                <span>?</span>
+                                            </div>
+                                            <MudText Typo="Typo.body2">額度未知</MudText>
+                                        }
+                                    </div>
+
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                        重設時間：@FormatTimestamp(window.ResetsAtUtc)
+                                    </MudText>
+                                </section>
+                            }
+                        </div>
+                    } else {
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                            尚無可用額度。前往 @ProviderTitle(provider.Kind) 管理頁查看帳號與額度狀態。
+                        </MudText>
+                    }
+
+                    @if (GetRecommendation(provider.Kind) is RecommendationAccount recommendation) {
+                        <MudText Typo="Typo.body2">建議切換：@recommendation.DisplayName（5 小時 @recommendation.FiveHourRemaining%・每週 @recommendation.WeeklyRemaining%）</MudText>
+                        <MudButton Href="@RecommendationHref(provider.Kind, recommendation.AccountId)" Variant="Variant.Filled" Color="Color.Primary">前往切換</MudButton>
+                    }
+
+                    <div class="dashboard-provider-meta">
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">資料來源：@provider.SourceLabel</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            額度更新時間：@FormatTimestamp(provider.RetrievedAtUtc)
+                            @if (provider.IsStale || provider.QuotaStatus == DashboardOverviewSnapshot.QuotaStatus.Stale) {
+                                <span>（資料已過期，顯示最近一次成功快照）</span>
+                            }
+                        </MudText>
+                    </div>
+
+                    <MudButton Href="@ManagementHref(provider.Kind)" Variant="Variant.Filled" Color="Color.Primary">
+                        前往 @ProviderTitle(provider.Kind) 管理頁
+                    </MudButton>
+
+                    <details class="dashboard-diagnostics">
+                        <summary>診斷明細</summary>
+                        <div class="dashboard-diagnostics-scroll">
+                            <dl class="dashboard-diagnostics-list">
+                                <div>
+                                    <dt>身分狀態</dt>
+                                    <dd>@IdentityStatusText(provider.IdentityStatus)</dd>
+                                </div>
+                                <div>
+                                    <dt>身分檢查時間</dt>
+                                    <dd>@FormatTimestamp(provider.CheckedAtUtc)</dd>
+                                </div>
+                                <div>
+                                    <dt>額度狀態</dt>
+                                    <dd>@QuotaStatusText(provider.QuotaStatus)</dd>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(provider.IdentityMessage)) {
+                                    <div>
+                                        <dt>身分訊息</dt>
+                                        <dd>@provider.IdentityMessage</dd>
+                                    </div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(provider.QuotaMessage)) {
+                                    <div>
+                                        <dt>額度訊息</dt>
+                                        <dd>@provider.QuotaMessage</dd>
+                                    </div>
+                                }
+                            </dl>
+                        </div>
+                    </details>
+                </MudPaper>
+            } else {
+                <MudPaper Elevation="0"
+                          Outlined="true"
+                          Class="dashboard-skeleton-card"
+                          role="status"
+                          aria-label="@LoadingLabel(kind)">
+                    <MudText Typo="Typo.h6">@ProviderTitle(kind)</MudText>
+                    <span class="dashboard-skeleton dashboard-skeleton-identity" aria-hidden="true"></span>
+                    <span class="dashboard-skeleton dashboard-skeleton-body" aria-hidden="true"></span>
+                </MudPaper>
+            }
+        }
+    </section>
+</MudStack>
+
+@code {
+    private static readonly DashboardOverviewSnapshot.ProviderKind[] providerKinds = [
+        DashboardOverviewSnapshot.ProviderKind.Claude,
+        DashboardOverviewSnapshot.ProviderKind.Codex
+    ];
+    private readonly CancellationTokenSource lifetimeCancellation = new();
+    private readonly AsyncLocal<bool> ownRead = new();
+    private DashboardOverviewSnapshot.Provider? codexProvider;
+    private DashboardOverviewSnapshot.Provider? claudeProvider;
+    private RecommendationAccount? codexRecommendation;
+    private RecommendationAccount? claudeRecommendation;
+    private bool isLoading = true;
+    private bool isDisposed;
+    private int isReading;
+    private int pendingRead;
+
+    protected override async Task OnInitializedAsync() {
+        Interlocked.Exchange(ref isReading, 1);
+        ClaudeQuotas.StateChanged += OnQuotaStateChanged;
+        CodexQuotas.StateChanged += OnQuotaStateChanged;
+        CancellationToken cancellationToken = lifetimeCancellation.Token;
+        try {
+            Task codexTask = ReadAndPublishProviderAsync(
+                DashboardOverviewSnapshot.ProviderKind.Codex,
+                cancellationToken
+            );
+            Task claudeTask = ReadAndPublishProviderAsync(
+                DashboardOverviewSnapshot.ProviderKind.Claude,
+                cancellationToken
+            );
+            await Task.WhenAll(codexTask, claudeTask);
+        } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+        } finally {
+            Interlocked.Exchange(ref isReading, 0);
+            if (Interlocked.Exchange(ref pendingRead, 0) != 0 && !isDisposed) {
+                OnQuotaStateChanged(this, EventArgs.Empty);
+            }
+            if (!isDisposed) {
+                isLoading = false;
+            }
+        }
+    }
+
+    public ValueTask DisposeAsync() {
+        if (isDisposed) {
+            return ValueTask.CompletedTask;
+        }
+
+        Volatile.Write(ref isDisposed, true);
+        ClaudeQuotas.StateChanged -= OnQuotaStateChanged;
+        CodexQuotas.StateChanged -= OnQuotaStateChanged;
+        lifetimeCancellation.Cancel();
+        lifetimeCancellation.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    private void OnQuotaStateChanged(object? sender, EventArgs e) {
+        if (Volatile.Read(ref isDisposed) || ownRead.Value) {
+            return;
+        }
+        if (Interlocked.CompareExchange(ref isReading, 1, 0) != 0) {
+            Interlocked.Exchange(ref pendingRead, 1);
+            if (Volatile.Read(ref isReading) == 0 && Interlocked.Exchange(ref pendingRead, 0) != 0) {
+                OnQuotaStateChanged(sender, e);
+            }
+            return;
+        }
+
+        _ = InvokeAsync(async () => {
+            try {
+                if (isDisposed) {
+                    return;
+                }
+
+                CancellationToken cancellationToken = lifetimeCancellation.Token;
+                try {
+                    await Task.WhenAll(
+                        ReadAndPublishProviderAsync(DashboardOverviewSnapshot.ProviderKind.Claude, cancellationToken),
+                        ReadAndPublishProviderAsync(DashboardOverviewSnapshot.ProviderKind.Codex, cancellationToken)
+                    );
+                } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+                }
+            } finally {
+                Interlocked.Exchange(ref isReading, 0);
+                if (Interlocked.Exchange(ref pendingRead, 0) != 0 && !isDisposed) {
+                    OnQuotaStateChanged(this, EventArgs.Empty);
+                }
+            }
+        });
+    }
+
+    private async Task ReadAndPublishProviderAsync(
+        DashboardOverviewSnapshot.ProviderKind kind,
+        CancellationToken cancellationToken
+    ) {
+        DashboardOverviewSnapshot.Provider provider;
+        ownRead.Value = true;
+        try {
+            provider = kind == DashboardOverviewSnapshot.ProviderKind.Codex
+                ? await OverviewReader.ReadCodexAsync(cancellationToken)
+                : await OverviewReader.ReadClaudeAsync(cancellationToken);
+        } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+            throw;
+        } catch (Exception) {
+            provider = CreateReadFailure(kind);
+        } finally {
+            ownRead.Value = false;
+        }
+
+        if (isDisposed || cancellationToken.IsCancellationRequested) {
+            return;
+        }
+
+        RecommendationAccount? recommendation = null;
+        {
+            ownRead.Value = true;
+            try {
+                recommendation = kind == DashboardOverviewSnapshot.ProviderKind.Codex
+                    ? await OverviewReader.ReadCodexRecommendationAsync(cancellationToken)
+                    : await OverviewReader.ReadClaudeRecommendationAsync(cancellationToken);
+            } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+                throw;
+            } catch (Exception) {
+                recommendation = null;
+            } finally {
+                ownRead.Value = false;
+            }
+        }
+        if (isDisposed || cancellationToken.IsCancellationRequested) {
+            return;
+        }
+
+        if (kind == DashboardOverviewSnapshot.ProviderKind.Codex) {
+            codexProvider = provider;
+            codexRecommendation = recommendation;
+        } else {
+            claudeProvider = provider;
+            claudeRecommendation = recommendation;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static DashboardOverviewSnapshot.Provider CreateReadFailure(
+        DashboardOverviewSnapshot.ProviderKind kind
+    ) {
+        bool isCodex = kind == DashboardOverviewSnapshot.ProviderKind.Codex;
+        return new(
+            kind,
+            DashboardOverviewSnapshot.IdentityStatus.Error,
+            DashboardOverviewSnapshot.QuotaStatus.Unknown,
+            null,
+            isCodex ? "Codex Desktop 身分與已保存額度" : "Claude Desktop 身分與已保存額度",
+            isCodex
+                ? "無法讀取 Codex Desktop 身分或已保存額度。"
+                : "無法讀取 Claude Desktop 身分或已保存額度。",
+            null,
+            null,
+            null,
+            [],
+            false
+        );
+    }
+
+    private static string ProviderTitle(DashboardOverviewSnapshot.ProviderKind kind) {
+        return kind == DashboardOverviewSnapshot.ProviderKind.Codex ? "Codex" : "Claude";
+    }
+
+    private static string ProviderKey(DashboardOverviewSnapshot.ProviderKind kind) {
+        return kind == DashboardOverviewSnapshot.ProviderKind.Codex ? "codex" : "claude";
+    }
+
+    private static string LoadingLabel(DashboardOverviewSnapshot.ProviderKind kind) {
+        return $"正在讀取 {ProviderTitle(kind)} 額度";
+    }
+
+    private DashboardOverviewSnapshot.Provider? GetProvider(DashboardOverviewSnapshot.ProviderKind kind) {
+        return kind == DashboardOverviewSnapshot.ProviderKind.Codex ? codexProvider : claudeProvider;
+    }
+
+    private RecommendationAccount? GetRecommendation(DashboardOverviewSnapshot.ProviderKind kind) {
+        return kind == DashboardOverviewSnapshot.ProviderKind.Codex ? codexRecommendation : claudeRecommendation;
+    }
+
+    private static string RecommendationHref(DashboardOverviewSnapshot.ProviderKind kind, Guid accountId) {
+        return AccountNavigation.Href(ProviderKey(kind), accountId);
+    }
+
+    private static string ManagementHref(DashboardOverviewSnapshot.ProviderKind kind) {
+        return kind == DashboardOverviewSnapshot.ProviderKind.Codex ? "/codex" : "/claude";
+    }
+
+    private static string IdentityStatusText(DashboardOverviewSnapshot.IdentityStatus status) {
+        return status switch {
+            DashboardOverviewSnapshot.IdentityStatus.Matched => "已匹配",
+            DashboardOverviewSnapshot.IdentityStatus.Unmatched => "未匹配已保存 profile",
+            DashboardOverviewSnapshot.IdentityStatus.Ambiguous => "無法唯一匹配",
+            DashboardOverviewSnapshot.IdentityStatus.Error => "身分讀取失敗",
+            DashboardOverviewSnapshot.IdentityStatus.ReauthenticationRequired => "需要重新登入",
+            DashboardOverviewSnapshot.IdentityStatus.RecoveryRequired => "待復原",
+            DashboardOverviewSnapshot.IdentityStatus.Unsupported => "不支援的安裝",
+            _ => "身分未知"
+        };
+    }
+
+    private static string QuotaStatusText(DashboardOverviewSnapshot.QuotaStatus status) {
+        return status switch {
+            DashboardOverviewSnapshot.QuotaStatus.Refreshing => "額度更新中",
+            DashboardOverviewSnapshot.QuotaStatus.Fresh => "資料有效",
+            DashboardOverviewSnapshot.QuotaStatus.Stale => "資料已過期",
+            DashboardOverviewSnapshot.QuotaStatus.ReauthenticationRequired => "額度需要重新登入",
+            DashboardOverviewSnapshot.QuotaStatus.Error => "額度讀取失敗",
+            DashboardOverviewSnapshot.QuotaStatus.Incomplete => "額度資料不完整",
+            _ => "額度未知"
+        };
+    }
+
+    private static Color IdentityColor(DashboardOverviewSnapshot.IdentityStatus status) {
+        return status switch {
+            DashboardOverviewSnapshot.IdentityStatus.Matched => Color.Success,
+            DashboardOverviewSnapshot.IdentityStatus.Error
+                or DashboardOverviewSnapshot.IdentityStatus.ReauthenticationRequired
+                or DashboardOverviewSnapshot.IdentityStatus.RecoveryRequired => Color.Error,
+            _ => Color.Warning
+        };
+    }
+
+    private static Color QuotaColor(DashboardOverviewSnapshot.QuotaStatus status) {
+        return status switch {
+            DashboardOverviewSnapshot.QuotaStatus.Fresh => Color.Success,
+            DashboardOverviewSnapshot.QuotaStatus.Error
+                or DashboardOverviewSnapshot.QuotaStatus.ReauthenticationRequired => Color.Error,
+            DashboardOverviewSnapshot.QuotaStatus.Stale
+                or DashboardOverviewSnapshot.QuotaStatus.Incomplete => Color.Warning,
+            _ => Color.Default
+        };
+    }
+
+    private static Severity IdentitySeverity(DashboardOverviewSnapshot.IdentityStatus status) {
+        return status switch {
+            DashboardOverviewSnapshot.IdentityStatus.Error
+                or DashboardOverviewSnapshot.IdentityStatus.ReauthenticationRequired
+                or DashboardOverviewSnapshot.IdentityStatus.RecoveryRequired => Severity.Error,
+            DashboardOverviewSnapshot.IdentityStatus.Matched => Severity.Info,
+            _ => Severity.Warning
+        };
+    }
+
+    private static Severity QuotaSeverity(DashboardOverviewSnapshot.QuotaStatus status) {
+        return status switch {
+            DashboardOverviewSnapshot.QuotaStatus.Error
+                or DashboardOverviewSnapshot.QuotaStatus.ReauthenticationRequired => Severity.Error,
+            DashboardOverviewSnapshot.QuotaStatus.Stale
+                or DashboardOverviewSnapshot.QuotaStatus.Incomplete => Severity.Warning,
+            _ => Severity.Info
+        };
+    }
+
+    private static double ToRingValue(decimal percent) {
+        return (double)percent;
+    }
+
+    private static string FormatPercent(decimal percent) {
+        return percent.ToString("0.##", CultureInfo.CurrentCulture);
+    }
+
+    private static string FormatTimestamp(DateTimeOffset? value) {
+        return value is DateTimeOffset timestamp
+            ? timestamp.ToLocalTime().ToString("yyyy/MM/dd HH:mm", CultureInfo.CurrentCulture)
+            : "未知";
+    }
+
+    private static string WindowAccessibleName(DashboardOverviewSnapshot.QuotaWindow window) {
+        return string.IsNullOrWhiteSpace(window.Scope)
+            ? window.Label
+            : $"{window.Label}，範圍：{window.Scope}";
+    }
+
+    private static string RingAccessibleName(
+        DashboardOverviewSnapshot.QuotaWindow window,
+        decimal remaining
+    ) {
+        return $"{WindowAccessibleName(window)}，{FormatPercent(remaining)}% 剩餘";
+    }
+
+    private static string UnknownRingLabel(DashboardOverviewSnapshot.QuotaWindow window) {
+        return $"{WindowAccessibleName(window)}，額度未知";
+    }
+}

@@ -1,0 +1,40 @@
+<span class="account-avatar @(IconOnly ? "account-avatar-icon-only" : null)" data-provider="@Provider" aria-hidden="true">
+    @if (IconOnly) {
+        @if (Provider == "claude") {
+            <MudIcon Icon="@Icons.Material.Filled.Flare" />
+        } else if (Provider == "codex") {
+            <MudIcon Icon="@Icons.Material.Filled.Hive" />
+        }
+    } else if (Provider == "claude") {
+        @Initial
+        <span class="account-avatar-brand account-avatar-brand-claude" aria-hidden="true"><MudIcon Icon="@Icons.Material.Filled.Flare" /></span>
+    } else if (Provider == "codex") {
+        @Initial
+        <span class="account-avatar-brand account-avatar-brand-codex" aria-hidden="true"><MudIcon Icon="@Icons.Material.Filled.Hive" /></span>
+    } else {
+        @Initial
+    }
+</span>
+
+@code {
+    [Parameter, EditorRequired]
+    public string DisplayName { get; set; } = null!;
+
+    [Parameter, EditorRequired]
+    public string Provider { get; set; } = null!;
+
+    [Parameter]
+    public bool IconOnly { get; set; }
+
+    private string Initial {
+        get {
+            string trimmed = DisplayName.Trim();
+            if (trimmed.Length == 0) {
+                return "?";
+            }
+
+            System.Globalization.StringInfo text = new(trimmed);
+            return text.SubstringByTextElements(0, 1).ToUpper(CultureInfo.CurrentCulture);
+        }
+    }
+}

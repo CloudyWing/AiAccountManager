@@ -1,0 +1,80 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    env:
+      CODEX_APP_SERVER_URL: https://github.com/openai/codex/releases/download/rust-v0.162.1/codex-app-server-x86_64-pc-windows-msvc.exe.zip
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Prepare build inputs
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          $nugetPackages = Join-Path $env:RUNNER_TEMP 'nuget-packages'
+          $appServerZip = Join-Path $env:RUNNER_TEMP 'codex-app-server-x86_64-pc-windows-msvc.exe.zip'
+          Invoke-WebRequest -Uri $env:CODEX_APP_SERVER_URL -OutFile $appServerZip
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
+          "NUGET_PACKAGES=$nugetPackages" >> $env:GITHUB_ENV
+          "CODEX_APP_SERVER_ZIP=$appServerZip" >> $env:GITHUB_ENV
+
+      - name: Restore
+        run: dotnet restore .\AiAccountManager.slnx
+
+      - name: Build
+        run: dotnet build .\AiAccountManager.slnx -c Release --no-restore -p:Version=${{ env.APP_VERSION }} -p:CodexAppServerZipPath=${{ env.CODEX_APP_SERVER_ZIP }}
+
+      - name: Test
+        run: dotnet test .\AiAccountManager.slnx -c Release --no-build --verbosity minimal
+
+      - name: Package
+        shell: pwsh
+        run: pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version $env:APP_VERSION -AppServerZipPath $env:CODEX_APP_SERVER_ZIP -NugetPackagesPath $env:NUGET_PACKAGES
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: velopack
+          path: artifacts/releases/*
+
+  create-release:
+    needs: build
+    uses: CloudyWing/devops-templates/.github/workflows/reusable-create-release.yml@main
+
+  upload-release-assets:
+    needs: create-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: velopack
+          path: artifacts/velopack
+
+      - name: Upload release assets
+        run: gh release upload ${{ github.ref_name }} artifacts/velopack/*
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

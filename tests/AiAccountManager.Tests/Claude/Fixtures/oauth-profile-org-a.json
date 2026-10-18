@@ -1,0 +1,9 @@
+{
+  "account": {
+    "uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "email_address": "account-a@example.test"
+  },
+  "organization": {
+    "uuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+  }
+}

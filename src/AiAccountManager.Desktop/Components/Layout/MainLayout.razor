@@ -1,0 +1,27 @@
+@inherits LayoutComponentBase
+
+<MudLayout Class="app-layout">
+    <MudAppBar Elevation="0" Color="Color.Default">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu"
+                       Color="Color.Inherit"
+                       aria-label="開啟或關閉導覽"
+                       OnClick="ToggleDrawer" />
+        <MudText Typo="Typo.h6" Class="app-title">AI 帳號管理工具</MudText>
+    </MudAppBar>
+    <MudDrawer @bind-Open="drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="1" Variant="DrawerVariant.Responsive">
+        <NavMenu />
+    </MudDrawer>
+    <MudMainContent Class="main-content">
+        <MudContainer MaxWidth="MaxWidth.Large" Class="page-container">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool drawerOpen = true;
+
+    private void ToggleDrawer() {
+        drawerOpen = !drawerOpen;
+    }
+}

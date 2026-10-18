@@ -1,0 +1,229 @@
+@page "/settings"
+@implements IDisposable
+@inject SettingsService SettingsState
+
+<PageTitle>設定</PageTitle>
+<MudStack Spacing="4" Class="page-stack">
+    <MudText Typo="Typo.h4">設定</MudText>
+    @if (SettingsState.SettingsError is not null) {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">
+            @SettingsState.SettingsError
+            <MudButton Color="Color.Error" Variant="Variant.Text" OnClick="RetrySettingsAsync">重新讀取</MudButton>
+        </MudAlert>
+    }
+    @if (SettingsState.StartupError is not null) {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@SettingsState.StartupError</MudAlert>
+    }
+    <MudPaper Elevation="0" Outlined="true" Class="content-card">
+        <MudText Typo="Typo.h6">外觀</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">選擇淺色、深色，或跟隨 Windows 的設定。</MudText>
+        <MudSelect T="AppThemeMode?" Label="主題" Value="selectedThemeMode" ValueChanged="SaveThemeModeAsync" Disabled="isSaving || SettingsState.Settings is null">
+            <MudSelectItem T="AppThemeMode?" Value="@AppThemeMode.System">跟隨系統</MudSelectItem>
+            <MudSelectItem T="AppThemeMode?" Value="@AppThemeMode.Light">淺色</MudSelectItem>
+            <MudSelectItem T="AppThemeMode?" Value="@AppThemeMode.Dark">深色</MudSelectItem>
+        </MudSelect>
+        <MudSelect T="bool" Label="重置消息" Value="@selectedResetNews" ValueChanged="SaveResetNewsAsync" Disabled="isSaving || SettingsState.Settings is null">
+            <MudSelectItem T="bool" Value="true">啟用</MudSelectItem>
+            <MudSelectItem T="bool" Value="false">停用</MudSelectItem>
+        </MudSelect>
+    </MudPaper>
+
+    <MudPaper Elevation="0" Outlined="true" Class="content-card">
+        <MudText Typo="Typo.h6">額度刷新</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">設定 Claude 與 Codex 額度的定期刷新間隔。</MudText>
+        <MudSelect T="TimeSpan?" Label="刷新間隔" Value="selectedInterval" ValueChanged="SaveRefreshIntervalAsync" Disabled="isSaving || SettingsState.Settings is null">
+            <MudSelectItem T="TimeSpan?" Value="@(TimeSpan.FromMinutes(1))">1 分鐘</MudSelectItem>
+            <MudSelectItem T="TimeSpan?" Value="@(TimeSpan.FromMinutes(5))">5 分鐘</MudSelectItem>
+            <MudSelectItem T="TimeSpan?" Value="@(TimeSpan.FromMinutes(15))">15 分鐘</MudSelectItem>
+            <MudSelectItem T="TimeSpan?" Value="@(TimeSpan.FromMinutes(30))">30 分鐘</MudSelectItem>
+        </MudSelect>
+        @if (isSaving) {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            <MudText Typo="Typo.caption">正在保存設定…</MudText>
+        }
+    </MudPaper>
+
+    <MudPaper Elevation="0" Outlined="true" Class="content-card">
+        <MudText Typo="Typo.h6">重置券自動使用</MudText>
+        <MudSelect T="bool" Label="重置券到期前自動使用" Value="@(SettingsState.Settings?.AutoUseResetCredits ?? false)" ValueChanged="SaveAutoUseAsync" Disabled="isSaving || SettingsState.Settings is null">
+            <MudSelectItem T="bool" Value="@true">啟用</MudSelectItem>
+            <MudSelectItem T="bool" Value="@false">停用</MudSelectItem>
+        </MudSelect>
+        <MudText Typo="Typo.body2">實驗性功能：自動使用依賴 Codex 未公開的介面，介面變動時可能失效或誤判。使用重置券後，5 小時與每週額度會重新計算，原本的重置時間會延後。App 必須保持執行，才會在到期前自動使用。</MudText>
+        <MudTextField T="int" Label="到期前分鐘數" Value="@(SettingsState.Settings?.AutoUseResetCreditsMinutes ?? 30)" ValueChanged="SaveAutoUseMinutesAsync" Error="@(autoUseMinutesError is not null)" ErrorText="@autoUseMinutesError" Disabled="isSaving || SettingsState.Settings is null" />
+    </MudPaper>
+
+    <MudPaper Elevation="0" Outlined="true" Class="content-card">
+        <MudText Typo="Typo.h6">常駐與啟動</MudText>
+        <MudSelect T="bool" Label="關閉視窗時縮到系統匣" Value="@(SettingsState.Settings?.MinimizeToTray ?? false)" ValueChanged="SaveMinimizeAsync" Disabled="isSaving || SettingsState.Settings is null">
+            <MudSelectItem T="bool" Value="@false">關閉</MudSelectItem>
+            <MudSelectItem T="bool" Value="@true">開啟</MudSelectItem>
+        </MudSelect>
+        <MudSelect T="bool" Label="開機時自動啟動" Value="@(SettingsState.Settings?.StartWithWindows ?? false)" ValueChanged="SaveStartupAsync" Disabled="isSaving || SettingsState.Settings is null">
+            <MudSelectItem T="bool" Value="@false">關閉</MudSelectItem>
+            <MudSelectItem T="bool" Value="@true">開啟</MudSelectItem>
+        </MudSelect>
+        @if (SettingsState.Settings is not null) {
+            <MudText Typo="Typo.caption">目前使用者啟動項目：@(SettingsState.IsStartupRegistered is true ? "已啟用" : SettingsState.IsStartupRegistered is false ? "未啟用" : "未知")</MudText>
+        }
+    </MudPaper>
+    <MudPaper Elevation="0" Outlined="true" Class="content-card">
+        <MudText Typo="Typo.h6">額度通知</MudText>
+        <MudSelect T="bool" Label="額度偏低通知" Value="@(SettingsState.Settings?.LowQuotaNotificationsEnabled ?? true)" ValueChanged="SaveNotificationsAsync" Disabled="isSaving || SettingsState.Settings is null">
+            <MudSelectItem T="bool" Value="@false">關閉</MudSelectItem>
+            <MudSelectItem T="bool" Value="@true">開啟</MudSelectItem>
+        </MudSelect>
+        <MudSelect T="int" Label="通知門檻" Value="@(SettingsState.Settings?.LowQuotaThresholdPercent ?? 20)" ValueChanged="SaveThresholdAsync" Disabled="isSaving || SettingsState.Settings is null">
+            @for (int percent = 5; percent <= 50; percent++) {
+                int value = percent;
+                <MudSelectItem T="int" Value="@value">@value%</MudSelectItem>
+            }
+        </MudSelect>
+    </MudPaper>
+    <UpdateSettings />
+</MudStack>
+
+@code {
+    private TimeSpan? selectedInterval;
+    private AppThemeMode? selectedThemeMode;
+    private bool isSaving;
+    private bool selectedResetNews = true;
+    private string? autoUseMinutesError;
+
+    private async Task SaveAutoUseAsync(bool value) {
+        if (SettingsState.Settings is null) { return; }
+        isSaving = true;
+        try { await SettingsState.SaveAsync(SettingsState.Settings with { AutoUseResetCredits = value }, CancellationToken.None); }
+        finally { isSaving = false; }
+    }
+
+    private async Task SaveAutoUseMinutesAsync(int value) {
+        if (value is < 5 or > 1440) {
+            autoUseMinutesError = "分鐘數必須介於 5 至 1440。";
+            return;
+        }
+        autoUseMinutesError = null;
+        if (SettingsState.Settings is null) { return; }
+        isSaving = true;
+        try { await SettingsState.SaveAsync(SettingsState.Settings with { AutoUseResetCreditsMinutes = value }, CancellationToken.None); }
+        finally { isSaving = false; }
+    }
+
+    private async Task SaveNotificationsAsync(bool value) {
+        if (SettingsState.Settings is null) {
+            return;
+        }
+        isSaving = true;
+        try {
+            await SettingsState.SaveAsync(SettingsState.Settings with { LowQuotaNotificationsEnabled = value }, CancellationToken.None);
+        } finally {
+            isSaving = false;
+        }
+    }
+
+    private async Task SaveThresholdAsync(int value) {
+        if (SettingsState.Settings is null) {
+            return;
+        }
+        isSaving = true;
+        try {
+            await SettingsState.SaveAsync(SettingsState.Settings with { LowQuotaThresholdPercent = value }, CancellationToken.None);
+        } finally {
+            isSaving = false;
+        }
+    }
+
+    private async Task SaveMinimizeAsync(bool value) {
+        if (SettingsState.Settings is null) {
+            return;
+        }
+        isSaving = true;
+        try {
+            await SettingsState.SaveAsync(SettingsState.Settings with { MinimizeToTray = value }, CancellationToken.None);
+        } finally {
+            isSaving = false;
+        }
+    }
+
+    private async Task SaveStartupAsync(bool value) {
+        if (SettingsState.Settings is null) {
+            return;
+        }
+        isSaving = true;
+        try {
+            await SettingsState.SaveAsync(SettingsState.Settings with { StartWithWindows = value }, CancellationToken.None);
+        } finally {
+            isSaving = false;
+        }
+    }
+
+    protected override void OnInitialized() {
+        SettingsState.StateChanged += OnStateChanged;
+        UpdateSelection();
+    }
+
+    public void Dispose() {
+        SettingsState.StateChanged -= OnStateChanged;
+    }
+
+    private async Task SaveRefreshIntervalAsync(TimeSpan? value) {
+        if (value is null || SettingsState.Settings is null) {
+            return;
+        }
+
+        isSaving = true;
+        selectedInterval = value;
+        int minutes = checked((int)value.Value.TotalMinutes);
+        try {
+            await SettingsState.SaveAsync(
+                SettingsState.Settings with { QuotaRefreshIntervalMinutes = minutes },
+                CancellationToken.None
+            );
+        } finally {
+            isSaving = false;
+        }
+    }
+
+    private async Task SaveResetNewsAsync(bool value) {
+        if (SettingsState.Settings is null) { return; }
+        isSaving = true;
+        selectedResetNews = value;
+        try {
+            await SettingsState.SaveAsync(SettingsState.Settings with { IsCodexResetNewsEnabled = value }, CancellationToken.None);
+        } finally { isSaving = false; }
+    }
+
+    private async Task SaveThemeModeAsync(AppThemeMode? value) {
+        if (value is null || SettingsState.Settings is null) {
+            return;
+        }
+
+        isSaving = true;
+        selectedThemeMode = value;
+        try {
+            await SettingsState.SaveAsync(
+                SettingsState.Settings with { ThemeMode = value.Value },
+                CancellationToken.None
+            );
+        } finally {
+            isSaving = false;
+        }
+    }
+
+    private async Task RetrySettingsAsync() {
+        await SettingsState.RetryLoadAsync(CancellationToken.None);
+    }
+
+    private void OnStateChanged(object? sender, EventArgs e) {
+        UpdateSelection();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void UpdateSelection() {
+        selectedInterval = SettingsState.Settings is null
+            ? null
+            : TimeSpan.FromMinutes(SettingsState.Settings.QuotaRefreshIntervalMinutes);
+        selectedThemeMode = SettingsState.Settings?.ThemeMode;
+        selectedResetNews = SettingsState.Settings?.IsCodexResetNewsEnabled ?? true;
+    }
+}

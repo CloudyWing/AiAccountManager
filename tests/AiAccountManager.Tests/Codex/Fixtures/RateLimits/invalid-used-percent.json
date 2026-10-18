@@ -1,0 +1,8 @@
+{
+  "accountId": "chatgpt-account-123",
+  "rateLimits": {
+    "limitId": null,
+    "primary": { "usedPercent": 101, "windowDurationMins": 300 },
+    "secondary": { "usedPercent": 40, "windowDurationMins": 10080 }
+  }
+}

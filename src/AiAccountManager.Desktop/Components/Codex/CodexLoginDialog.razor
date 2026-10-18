@@ -1,0 +1,39 @@
+<MudDialog Visible="@Visible" VisibleChanged="VisibleChanged" Options="@DialogOptions" ActionsClass="aam-dialog-actions">
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudText Typo="Typo.h6">連結 Codex 額度帳號</MudText>
+            <MudText Typo="Typo.body2">
+                請在系統預設瀏覽器完成 OAuth。只有登入完成並確認帳號身分後，profile 才會保存。
+            </MudText>
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            <MudText Typo="Typo.caption" Class="mud-text-secondary">取消會清理尚未提交的隔離 profile。</MudText>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Error" Variant="Variant.Text" OnClick="CancelAsync">取消登入</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter]
+    public bool Visible { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> VisibleChanged { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private static readonly DialogOptions DialogOptions = new() {
+        CloseButton = false,
+        CloseOnEscapeKey = false,
+        BackdropClick = false,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true
+    };
+
+    private async Task CancelAsync() {
+        await OnCancel.InvokeAsync();
+        await VisibleChanged.InvokeAsync(false);
+    }
+}

@@ -1,0 +1,120 @@
+@implements IDisposable
+@inject StartupRenderProbe RenderProbe
+@inject SettingsService SettingsState
+
+<HeadOutlet />
+<MudThemeProvider @ref="themeProvider" Theme="@Theme" IsDarkMode="@isDarkMode" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+<div class="@(isDarkMode ? "app-theme-dark" : "app-theme-light")">
+<Router AppAssembly="@typeof(App).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="routeData" DefaultLayout="@typeof(Layout.MainLayout)" />
+    </Found>
+    <NotFound>
+        <LayoutView Layout="@typeof(Layout.MainLayout)">
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                <MudStack Spacing="2">
+                    <MudText Typo="Typo.body1">找不到這個頁面。請前往儀表板或選擇管理頁。</MudText>
+                    <div class="dashboard-not-found-links">
+                        <a href="/">儀表板</a>
+                        <a href="/claude">Claude 管理</a>
+                        <a href="/codex">Codex 管理</a>
+                        <a href="/settings">設定</a>
+                    </div>
+                </MudStack>
+            </MudAlert>
+        </LayoutView>
+    </NotFound>
+</Router>
+</div>
+
+@code {
+    private static readonly MudTheme Theme = new() {
+        PaletteLight = new PaletteLight {
+            Background = "#ffffff",
+            Surface = "#f6f6f7",
+            DrawerBackground = "#f8f8f8",
+            AppbarBackground = "#ffffff",
+            TextPrimary = "#1f2937",
+            TextSecondary = "#4b5563",
+            Divider = "rgba(176, 33, 33, .15)",
+            LinesDefault = "#c2c2c4",
+            LinesInputs = "#c2c2c4",
+            Primary = "#dc2626",
+            PrimaryContrastText = "#ffffff",
+            Secondary = "#b02121",
+            Tertiary = "#d97706"
+        },
+        PaletteDark = new PaletteDark {
+            Background = "#1c1b1f",
+            Surface = "#161618",
+            DrawerBackground = "#26242a",
+            AppbarBackground = "#202127",
+            TextPrimary = "#f8fafc",
+            TextSecondary = "#a8a29e",
+            Divider = "rgba(248, 250, 252, .12)",
+            LinesDefault = "#3c3f44",
+            LinesInputs = "#3c3f44",
+            Primary = "#fb923c",
+            PrimaryContrastText = "#111827",
+            Secondary = "#f97316",
+            Tertiary = "#d97706"
+        }
+    };
+
+    private MudThemeProvider? themeProvider;
+    private bool isDarkMode;
+    private bool isSystemDarkMode;
+
+    protected override void OnInitialized() {
+        RenderProbe.RecordEvent("blazor.root.initialized");
+        SettingsState.StateChanged += OnSettingsChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender) {
+        if (firstRender) {
+            RenderProbe.RecordEvent("blazor.root.after-render.first");
+            await RenderProbe.OnFirstRenderAsync(firstRender);
+            if (themeProvider is not null) {
+                isSystemDarkMode = await themeProvider.GetSystemDarkModeAsync();
+                await themeProvider.WatchSystemDarkModeAsync(OnSystemDarkModeChangedAsync);
+            }
+
+            if (ApplyThemeMode()) {
+                StateHasChanged();
+            }
+        }
+    }
+
+    public void Dispose() {
+        SettingsState.StateChanged -= OnSettingsChanged;
+    }
+
+    private Task OnSystemDarkModeChangedAsync(bool isDark) {
+        isSystemDarkMode = isDark;
+        return ApplyThemeMode() ? InvokeAsync(StateHasChanged) : Task.CompletedTask;
+    }
+
+    private void OnSettingsChanged(object? sender, EventArgs e) {
+        if (ApplyThemeMode()) {
+            _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // 回傳深色模式是否改變，讓呼叫端只在需要時重新繪製。
+    private bool ApplyThemeMode() {
+        bool next = (SettingsState.Settings?.ThemeMode ?? AppThemeMode.System) switch {
+            AppThemeMode.Light => false,
+            AppThemeMode.Dark => true,
+            _ => isSystemDarkMode
+        };
+        if (next == isDarkMode) {
+            return false;
+        }
+
+        isDarkMode = next;
+        return true;
+    }
+}

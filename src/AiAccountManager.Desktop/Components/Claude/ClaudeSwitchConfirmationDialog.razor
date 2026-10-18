@@ -1,0 +1,187 @@
+<MudDialog Visible="@Visible" VisibleChanged="SetVisibleAsync" Options="@DialogOptions" Class="claude-switch-confirmation-dialog" ActionsClass="aam-dialog-actions">
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudText Typo="Typo.h6">確認切換 Claude Desktop 帳號</MudText>
+
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="6">
+                    <MudPaper Elevation="0" Outlined="true" Class="content-card">
+                        <MudStack Spacing="1">
+                            <MudText Typo="Typo.subtitle2">目前來源</MudText>
+                            <MudText Typo="Typo.body1">@SourceDisplayName</MudText>
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary">身分：@SourceIdentity</MudText>
+                            @if (!string.IsNullOrWhiteSpace(SourceOrganization)) {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">組織：@SourceOrganization</MudText>
+                            }
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudPaper Elevation="0" Outlined="true" Class="content-card">
+                        <MudStack Spacing="1">
+                            <MudText Typo="Typo.subtitle2">切換目標</MudText>
+                            <MudText Typo="Typo.body1">@TargetDisplayName</MudText>
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary">身分：@TargetIdentity</MudText>
+                            @if (!string.IsNullOrWhiteSpace(TargetOrganization)) {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">組織：@TargetOrganization</MudText>
+                            }
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+
+            @if (RequiresHistoryOverwrite) {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                    <MudStack Spacing="1">
+                        <MudText Typo="Typo.body1">確認後會關閉並重新啟動 Claude Desktop，並以來源帳號的完整 Code Session 清單覆蓋目標帳號的清單。</MudText>
+                        @if (SourceSessionCount is int sourceSessionCount && TargetSessionCount is int targetSessionCount) {
+                            <MudText Typo="Typo.body2">來源清單 @sourceSessionCount 個 Session，目標目前有 @targetSessionCount 個 Session。</MudText>
+                        }
+                        <MudText Typo="Typo.body2">目標帳號的 Session 資料夾會整個換成來源帳號的內容，包含排程任務與封存紀錄；原內容會先備份，切換失敗時自動還原。共用 transcript 與 sidecar 檔案不會複製或改寫。</MudText>
+                    </MudStack>
+                </MudAlert>
+            } else {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                    確認後會關閉並重新啟動 Claude Desktop。此切換不會變更 Code Session 清單。
+                </MudAlert>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(PreviewMessage)) {
+                <MudAlert Severity="@(CanConfirm ? Severity.Info : Severity.Warning)" Variant="Variant.Outlined">
+                    @PreviewMessage
+                </MudAlert>
+            }
+
+            @if (IsSubmitting) {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">@(ProgressMessage ?? "正在執行切換與 Session 同步…")</MudText>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(StatusMessage)
+                && !string.Equals(StatusMessage, PreviewMessage, StringComparison.Ordinal)) {
+                <MudAlert Severity="@StatusSeverity" Variant="Variant.Outlined">@StatusMessage</MudAlert>
+            }
+
+            @if (IsRecoveryRequired && !string.IsNullOrWhiteSpace(RecoveryMessage)) {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@RecoveryMessage</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        @if (IsRecoveryRequired && OnRecover.HasDelegate) {
+            <MudButton Color="Color.Error" Variant="Variant.Text" Disabled="@IsSubmitting" OnClick="RecoverAsync">
+                @(IsSubmitting ? "正在復原…" : "嘗試復原")
+            </MudButton>
+        }
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(IsSubmitting || !CanConfirm || IsRecoveryRequired)" OnClick="ConfirmAsync">
+            @(IsSubmitting ? "正在切換…" : RequiresHistoryOverwrite ? "確認切換並同步" : "確認切換")
+        </MudButton>
+        <MudButton Variant="Variant.Text" Disabled="@IsSubmitting" OnClick="CancelAsync">取消</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter]
+    public bool Visible { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> VisibleChanged { get; set; }
+
+    [Parameter, EditorRequired]
+    public string SourceDisplayName { get; set; } = null!;
+
+    [Parameter, EditorRequired]
+    public string SourceIdentity { get; set; } = null!;
+
+    [Parameter]
+    public string? SourceOrganization { get; set; }
+
+    [Parameter, EditorRequired]
+    public string TargetDisplayName { get; set; } = null!;
+
+    [Parameter, EditorRequired]
+    public string TargetIdentity { get; set; } = null!;
+
+    [Parameter]
+    public string? TargetOrganization { get; set; }
+
+    [Parameter]
+    public bool CanConfirm { get; set; }
+
+    [Parameter]
+    public bool RequiresHistoryOverwrite { get; set; }
+
+    [Parameter]
+    public int? SourceSessionCount { get; set; }
+
+    [Parameter]
+    public int? TargetSessionCount { get; set; }
+
+    [Parameter]
+    public string? PreviewMessage { get; set; }
+
+    [Parameter]
+    public bool IsSubmitting { get; set; }
+
+    [Parameter]
+    public string? ProgressMessage { get; set; }
+
+    [Parameter]
+    public string? StatusMessage { get; set; }
+
+    [Parameter]
+    public Severity StatusSeverity { get; set; } = Severity.Info;
+
+    [Parameter]
+    public bool IsRecoveryRequired { get; set; }
+
+    [Parameter]
+    public string? RecoveryMessage { get; set; }
+
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    [Parameter]
+    public EventCallback OnRecover { get; set; }
+
+    private static readonly DialogOptions DialogOptions = new() {
+        CloseButton = false,
+        CloseOnEscapeKey = true,
+        BackdropClick = false,
+        MaxWidth = MaxWidth.Medium,
+        FullWidth = true
+    };
+
+    private Task ConfirmAsync() {
+        return IsSubmitting || !CanConfirm || IsRecoveryRequired
+            ? Task.CompletedTask
+            : OnConfirm.InvokeAsync();
+    }
+
+    private async Task CancelAsync() {
+        if (!IsSubmitting) {
+            await SetVisibleAsync(false);
+        }
+    }
+
+    private async Task RecoverAsync() {
+        if (IsRecoveryRequired && !IsSubmitting) {
+            await OnRecover.InvokeAsync();
+        }
+    }
+
+    private async Task SetVisibleAsync(bool visible) {
+        if (!visible && IsSubmitting) {
+            return;
+        }
+
+        if (!visible) {
+            await OnCancel.InvokeAsync();
+        }
+
+        await VisibleChanged.InvokeAsync(visible);
+    }
+}

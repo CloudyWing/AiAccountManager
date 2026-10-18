@@ -1,0 +1,80 @@
+<MudDialog Visible="@Visible" VisibleChanged="VisibleChanged" Options="@DialogOptions" Class="codex-switch-dialog" ActionsClass="aam-dialog-actions">
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h6">切換 Codex Desktop 帳號</MudText>
+            <dl class="account-detail-list">
+                <div>
+                    <dt>目前帳號</dt>
+                    <dd>@SourceDisplayName</dd>
+                </div>
+                <div>
+                    <dt>切換為</dt>
+                    <dd>@TargetDisplayName</dd>
+                </div>
+            </dl>
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                @if (DesktopRunning) {
+                    <span>會先正常關閉 Codex Desktop，保存目前帳號最新的登入後改用目標帳號，完成後重新開啟。若 Codex Desktop 未在 20 秒內結束，切換會中止且不改變任何登入。</span>
+                } else {
+                    <span>Codex Desktop 未執行。會保存目前帳號最新的登入後改用目標帳號，下次開啟 Codex Desktop 即為目標帳號。</span>
+                }
+            </MudAlert>
+            @if (Busy) {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@Busy" OnClick="ConfirmAsync">
+            @(Busy ? "正在切換…" : "確認切換")
+        </MudButton>
+        <MudButton Variant="Variant.Text" Disabled="@Busy" OnClick="CancelAsync">取消</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static readonly DialogOptions DialogOptions = new() {
+        CloseButton = false,
+        CloseOnEscapeKey = true,
+        BackdropClick = false,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true
+    };
+
+    [Parameter]
+    public bool Visible { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> VisibleChanged { get; set; }
+
+    [Parameter, EditorRequired]
+    public string SourceDisplayName { get; set; } = null!;
+
+    [Parameter, EditorRequired]
+    public string TargetDisplayName { get; set; } = null!;
+
+    [Parameter]
+    public bool DesktopRunning { get; set; }
+
+    [Parameter]
+    public bool Busy { get; set; }
+
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private async Task ConfirmAsync() {
+        if (!Busy) {
+            await OnConfirm.InvokeAsync();
+        }
+    }
+
+    private async Task CancelAsync() {
+        if (!Busy) {
+            await OnCancel.InvokeAsync();
+            await VisibleChanged.InvokeAsync(false);
+        }
+    }
+}

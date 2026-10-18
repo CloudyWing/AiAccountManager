@@ -1,0 +1,949 @@
+@page "/codex"
+@implements IAsyncDisposable
+@inject SettingsService SettingsState
+@inject CodexProfileService Profiles
+@inject CodexQuotaService Quotas
+@inject CodexLocalIdentityService LocalIdentity
+@inject CodexDesktopSwitchService DesktopSwitch
+@inject CodexResetNewsService ResetNews
+@inject CodexResetCreditAutoUseService AutoUse
+@inject CloudyWing.AiAccountManager.Application.Runtime.IClock Clock
+@using CloudyWing.AiAccountManager.Desktop.Components
+@inject ISnackbar Snackbar
+@inject IJSRuntime Js
+
+<PageTitle>Codex 帳號</PageTitle>
+<MudStack Spacing="4" Class="page-stack">
+    @if (HasFeedback) {
+        <div class="codex-feedback-region" role="region" aria-label="Codex 頁面訊息">
+            @if (SettingsState.CatalogError is not null) {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">
+                    @SettingsState.CatalogError
+                    <MudButton Color="Color.Error" Variant="Variant.Text" Disabled="@isSubmitting" OnClick="RetryCatalogAsync">重試讀取</MudButton>
+                </MudAlert>
+            }
+
+            @if (operationError is not null) {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@operationError</MudAlert>
+            }
+
+            @if (desktopState?.RecoveryRequired == true) {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Spacing="2" Wrap="Wrap.Wrap">
+                        <MudText Typo="Typo.body2">偵測到未完成的 Codex Desktop 切換。請完全結束 Codex Desktop 後還原切換前的登入；還原前無法再次切換。</MudText>
+                        <MudButton Color="Color.Error" Variant="Variant.Text" Disabled="@isSubmitting" OnClick="RecoverDesktopAsync">
+                            @(isSubmitting && desktopAction == DesktopAction.Recover ? "正在還原…" : "還原 Desktop 登入")
+                        </MudButton>
+                    </MudStack>
+                </MudAlert>
+            }
+
+            @foreach (CodexAccountProfile account in SettingsState.Accounts) {
+                QuotaSnapshotView? quota = GetQuota(account.AccountId);
+                if (!string.IsNullOrWhiteSpace(quota?.Message)) {
+                    <MudAlert Severity="@GetQuotaMessageSeverity(quota.Status)" Variant="Variant.Outlined">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Spacing="2">
+                            <MudText Typo="Typo.body2">@GetAccountDisplayName(account)：@quota.Message</MudText>
+                            <MudButton Color="Color.Error" Variant="Variant.Text" Disabled="@isSubmitting" OnClick="() => RefreshQuotaAsync(account.AccountId)">
+                                重新整理額度
+                            </MudButton>
+                        </MudStack>
+                    </MudAlert>
+                }
+            }
+
+            @if (LocalIdentitySnapshot.IsMonitoring && !LocalIdentitySnapshot.IsMonitoringAvailable) {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                    檔案自動監看不可用，請手動重新讀取本機登入資料。
+                    <MudButton Variant="Variant.Text" Disabled="@IsReadingIdentity" OnClick="ReadLocalIdentityAsync">重新讀取</MudButton>
+                </MudAlert>
+            }
+
+            @if (IsLocalIdentityError) {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">
+                    @GetLocalIdentityMessage(LocalIdentitySnapshot.Status)
+                    @if (LocalIdentitySnapshot.Status == CodexLocalIdentityStatus.CatalogUnavailable) {
+                        <MudButton Color="Color.Error" Variant="Variant.Text" Disabled="@isSubmitting" OnClick="RetryCatalogAsync">重試讀取帳號清單</MudButton>
+                    } else {
+                        <MudButton Color="Color.Error" Variant="Variant.Text" Disabled="@IsReadingIdentity" OnClick="ReadLocalIdentityAsync">重新讀取</MudButton>
+                    }
+                </MudAlert>
+            }
+        </div>
+    }
+
+    <header class="page-heading">
+        <MudText Typo="Typo.h4">Codex 帳號</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            切換 Codex Desktop 登入帳號，並以隔離的 Codex home 查詢各帳號額度。額度每 @(SettingsState.Settings?.QuotaRefreshIntervalMinutes ?? AppSettings.Defaults.QuotaRefreshIntervalMinutes) 分鐘自動刷新。
+        </MudText>
+    </header>
+
+    @if (SettingsState.Settings?.IsCodexResetNewsEnabled ?? true) {
+        CodexResetNewsService.State news = ResetNews.Current;
+        <MudPaper Elevation="0" Outlined="true" Class="content-card">
+            <MudText Typo="Typo.h6">Codex 重置消息</MudText>
+            <MudText Typo="Typo.caption">資料來源：codex-resets.com（第三方）</MudText>
+            @if (news.IsLoading) {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                <MudText>正在取得重置消息。</MudText>
+            } else if (news.IsUnavailable) {
+                <MudText>暫時無法取得</MudText>
+            } else {
+                <MudText>
+                    預定下次重置：@(news.HasScheduled ? news.ScheduledAtUtc.HasValue ? TaiwanTimeUtils.Format(news.ScheduledAtUtc.Value) : "已宣布，時間未定" : "目前沒有預定")
+                    @if (news.ScheduledUrl is not null) { <a href="@news.ScheduledUrl" target="_blank" rel="noopener noreferrer">原文</a> }
+                </MudText>
+                <MudText>
+                    最近一次重置：@(news.LatestAtUtc.HasValue ? TaiwanTimeUtils.Format(news.LatestAtUtc.Value) + "（" + DaysSince(news.LatestAtUtc.Value) + " 天前）" : "尚無最近一次重置")
+                    @if (news.LatestUrl is not null) { <a href="@news.LatestUrl" target="_blank" rel="noopener noreferrer">原文</a> }
+                </MudText>
+                <MudText>平均間隔：@(news.AverageDays.HasValue ? news.AverageDays.Value.ToString("0.##", CultureInfo.InvariantCulture) + " 天" : "未知")</MudText>
+            }
+        </MudPaper>
+    }
+
+    <MudPaper Elevation="0" Outlined="true" Class="content-card identity-banner codex-local-identity-banner" data-provider="codex">
+        <div class="identity-banner-heading">
+            <MudIcon Icon="@Icons.Material.Outlined.DesktopWindows" Class="identity-banner-icon" />
+            <div class="identity-banner-text">
+                <MudText Typo="Typo.overline" Class="mud-text-secondary">本機登入資料與 Codex Desktop 程序</MudText>
+                <MudText Typo="Typo.h6">
+                    @(string.IsNullOrWhiteSpace(LocalIdentitySnapshot.MaskedIdentity) ? "身分未知" : LocalIdentitySnapshot.MaskedIdentity)
+                </MudText>
+            </div>
+            <div class="identity-banner-actions">
+                <MudChip T="string" Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small">
+                    Codex Desktop：@DesktopProcessStatusText
+                </MudChip>
+                <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@IsReadingIdentity" OnClick="ReadLocalIdentityAsync">
+                    @(IsReadingIdentity ? "正在讀取…" : "重新讀取")
+                </MudButton>
+            </div>
+        </div>
+        @if (IsReadingIdentity) {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        <MudText Typo="Typo.body2">@GetLocalIdentityMessage(LocalIdentitySnapshot.Status)</MudText>
+        @if (LocalIdentitySnapshot.Status == CodexLocalIdentityStatus.Matched) {
+            <div class="identity-banner-capture">
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    @(HasDesktopSnapshot(LocalIdentitySnapshot.MatchedProfileAccountId)
+                        ? "已保存此帳號的 Desktop 登入；重新保存會以目前登入覆蓋。"
+                        : "保存此帳號的 Desktop 登入後，就能從其他帳號一鍵切回這個帳號。")
+                </MudText>
+                <MudButton Color="Color.Primary"
+                           Variant="Variant.Filled"
+                           StartIcon="@Icons.Material.Outlined.Save"
+                           Disabled="@(isSubmitting || desktopState?.RecoveryRequired == true)"
+                           OnClick="CaptureDesktopLoginAsync">
+                    @(isSubmitting && desktopAction == DesktopAction.Capture ? "正在保存…" : "保存目前 Desktop 登入")
+                </MudButton>
+            </div>
+        }
+        <details class="identity-banner-details">
+            <summary>辨識明細</summary>
+            <dl class="account-detail-list">
+                <div>
+                    <dt>辨識來源</dt>
+                    <dd>依本機登入資料辨識</dd>
+                </div>
+                <div>
+                    <dt>檢查時間</dt>
+                    <dd>@(LocalIdentitySnapshot.CheckedAtUtc?.ToLocalTime().ToString("yyyy/MM/dd HH:mm:ss", CultureInfo.CurrentCulture) ?? "尚未檢查")</dd>
+                </div>
+                <div>
+                    <dt>程序檢查時間</dt>
+                    <dd>@LocalIdentity.ProcessStatusSnapshot.CheckedAtUtc.ToLocalTime().ToString("yyyy/MM/dd HH:mm:ss", CultureInfo.CurrentCulture)</dd>
+                </div>
+            </dl>
+        </details>
+    </MudPaper>
+
+    @if (SettingsState.Accounts.Count == 0 && SettingsState.CatalogError is null) {
+        <MudPaper Elevation="0" Outlined="true" Class="content-card empty-state">
+            <MudText Typo="Typo.h6">尚未加入 Codex 額度帳號</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                額度只會在完成 Codex OAuth 並確認帳號身分後顯示。此處不使用範例帳號或模擬額度。
+            </MudText>
+        </MudPaper>
+    }
+
+    @if (SettingsState.Accounts.Count > 0) {
+        <div class="account-list-heading">
+            <MudText Typo="Typo.h6">已保存帳號</MudText>
+            <MudChip T="string" Color="Color.Default" Variant="Variant.Text" Size="Size.Small">@SettingsState.Accounts.Count 個</MudChip>
+        </div>
+        @for (int index = 0; index < SettingsState.Accounts.Count; index++) {
+            CodexAccountProfile account = SettingsState.Accounts[index];
+            <div @key="account.AccountId" id="@(AccountNavigation.ElementId("codex", account.AccountId))">
+            <CodexAccountCard
+                              Account="account"
+                              Quota="GetQuota(account.AccountId)"
+                              AliasValue="@GetAlias(account)"
+                              AliasValueChanged="value => SetAlias(account.AccountId, value)"
+                              Busy="isSubmitting"
+                              CreditRefreshRequired="@creditRefreshRequired.Contains(account.AccountId)"
+                              LastAutoUse="@AutoUse.GetLatest(account.AccountId)"
+                              IsLocallyMatched="@(LocalIdentitySnapshot.MatchedProfileAccountId == account.AccountId)"
+                              CanMoveUp="@(index > 0)"
+                              CanMoveDown="@(index < SettingsState.Accounts.Count - 1)"
+                              OnSaveAlias="SaveAliasAsync"
+                              OnRefresh="RefreshQuotaAsync"
+                              OnUseCredit="BeginUseCredit"
+                              OnRemove="BeginRemove"
+                              OnMoveUp="MoveAccountUpAsync"
+                              OnMoveDown="MoveAccountDownAsync"
+                              CanSwitch="@CanSwitchTo(account)"
+                              SwitchDisabledReason="@SwitchDisabledReason(account)"
+                              IsSwitching="@(isSubmitting && desktopAction == DesktopAction.Switch && switchTargetAccountId == account.AccountId)"
+                              OnSwitch="BeginSwitch" />
+            </div>
+        }
+    }
+
+    <MudPaper Elevation="0" Outlined="true" Class="content-card add-account-card">
+        <MudText Typo="Typo.h6">加入額度帳號</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+            登入會在系統預設瀏覽器完成。認證資料使用此應用程式專屬的 Codex home 與 Windows keyring。
+        </MudText>
+        <MudTextField T="string" Label="帳號別名（選填）" Value="newAlias" ValueChanged="SetNewAlias" Disabled="isAdding || isSubmitting" />
+        <div>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Add" Disabled="isAdding || isSubmitting" OnClick="AddAccountAsync">
+                @(isAdding ? "正在加入…" : "加入額度帳號")
+            </MudButton>
+        </div>
+    </MudPaper>
+</MudStack>
+
+<CodexLoginDialog Visible="@isAdding" VisibleChanged="SetLoginDialogVisible" OnCancel="CancelLogin" />
+<ResetCreditDialog Visible="@(creditAccountId.HasValue)" VisibleChanged="SetCreditDialogVisible"
+                   Snapshot="@creditSnapshot" CreditId="@creditId" Busy="@isSubmitting"
+                   OnConfirm="ConfirmCreditAsync" OnCancel="CancelCredit" />
+<CodexRemoveAccountDialog Visible="@IsRemoveDialogOpen"
+                          VisibleChanged="SetRemoveDialogVisible"
+                          Account="@RemovingAccount"
+                          Busy="isSubmitting"
+                          OnConfirm="RemoveAccountAsync"
+                          OnCancel="CancelRemove" />
+<CodexSwitchConfirmationDialog Visible="@(switchTargetAccountId is not null)"
+                               VisibleChanged="SetSwitchDialogVisible"
+                               SourceDisplayName="@SwitchSourceDisplayName"
+                               TargetDisplayName="@SwitchTargetDisplayName"
+                               DesktopRunning="@(LocalIdentity.ProcessStatusSnapshot.Status == CodexDesktopProcessStatus.Running)"
+                               Busy="@(isSubmitting && desktopAction == DesktopAction.Switch)"
+                               OnConfirm="ConfirmSwitchAsync"
+                               OnCancel="CancelSwitch" />
+
+@code {
+    [SupplyParameterFromQuery(Name = "account")]
+    public string? AccountQuery { get; set; }
+
+    private readonly Dictionary<Guid, string?> aliasValues = [];
+    private readonly Dictionary<Guid, QuotaSnapshotView> quotaViews = [];
+    private readonly HashSet<Guid> creditRefreshRequired = [];
+    private readonly SemaphoreSlim quotaViewGate = new(1, 1);
+    private readonly object quotaViewLifetimeSync = new();
+    private readonly TaskCompletionSource<bool> quotaViewReloadsDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly CancellationTokenSource pageLifetimeCancellation = new();
+    private CancellationTokenSource? loginCancellation;
+    private Task? desktopProcessPolling;
+    private string? newAlias;
+    private string? operationError;
+    private Guid? confirmRemoveAccountId;
+    private Guid? creditAccountId;
+    private long creditProfileRevision;
+    private string? creditId;
+    private QuotaSuccessfulSnapshot? creditSnapshot;
+    private bool isAdding;
+    private bool isSubmitting;
+    private bool entryViewsLoaded;
+    private bool entryRefreshStarted;
+    private int disposed;
+    private int activeQuotaViewReloads;
+    private CodexDesktopSwitchService.SwitchState? desktopState;
+    private Guid? switchTargetAccountId;
+    private DesktopAction desktopAction;
+    private string? handledAccountQuery;
+
+    protected override async Task OnInitializedAsync() {
+        SettingsState.StateChanged += OnStateChanged;
+        Profiles.StateChanged += OnStateChanged;
+        Quotas.StateChanged += OnQuotaStateChanged;
+        ResetNews.StateChanged += OnLocalIdentityStateChanged;
+        AutoUse.StateChanged += OnLocalIdentityStateChanged;
+        LocalIdentity.StateChanged += OnLocalIdentityStateChanged;
+        await ReloadQuotaViewsAsync();
+        entryViewsLoaded = true;
+        await ReloadDesktopStateAsync();
+        try {
+            await LocalIdentity.StartMonitoringAsync(pageLifetimeCancellation.Token);
+            await LocalIdentity.ReadProcessStatusAsync(pageLifetimeCancellation.Token);
+            desktopProcessPolling = PollDesktopProcessStatusAsync(pageLifetimeCancellation.Token);
+        } catch (OperationCanceledException) when (pageLifetimeCancellation.IsCancellationRequested) {
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender) {
+        if (entryViewsLoaded && !entryRefreshStarted) {
+            entryRefreshStarted = true;
+            _ = RefreshStaleOnEntryAsync(SettingsState.Accounts.ToArray(), pageLifetimeCancellation.Token);
+        }
+
+        string? requested = AccountQuery;
+        if (entryViewsLoaded && requested != handledAccountQuery) {
+            handledAccountQuery = requested;
+            if (Guid.TryParse(requested, out Guid accountId)
+                && SettingsState.Accounts.Any(account => account.AccountId == accountId)) {
+                await Js.InvokeVoidAsync("accountNavigation.scrollTo", pageLifetimeCancellation.Token, AccountNavigation.ElementId("codex", accountId), requested);
+            }
+        }
+    }
+
+    private async Task RefreshStaleOnEntryAsync(
+        IReadOnlyList<CodexAccountProfile> accounts,
+        CancellationToken cancellationToken
+    ) {
+        int interval = SettingsState.Settings?.QuotaRefreshIntervalMinutes ?? AppSettings.Defaults.QuotaRefreshIntervalMinutes;
+        DateTimeOffset cutoff = DateTimeOffset.UtcNow.AddMinutes(-interval);
+        foreach (CodexAccountProfile account in accounts) {
+            if (cancellationToken.IsCancellationRequested) {
+                return;
+            }
+
+            QuotaSnapshotView? view = GetQuota(account.AccountId);
+            if (view?.Status is QuotaDisplayStatus.Refreshing or QuotaDisplayStatus.ReauthenticationRequired) {
+                continue;
+            }
+            if (view?.Snapshot?.LastSuccessfulSnapshot is QuotaSuccessfulSnapshot snapshot
+                && snapshot.RetrievedAtUtc >= cutoff) {
+                continue;
+            }
+
+            try {
+                _ = await Quotas.RefreshAsync(account.AccountId, cancellationToken);
+            } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+                return;
+            } catch (Exception) {
+            }
+        }
+    }
+
+    public async ValueTask DisposeAsync() {
+        Task reloadsDrained;
+        lock (quotaViewLifetimeSync) {
+            if (disposed != 0) {
+                return;
+            }
+
+            Volatile.Write(ref disposed, 1);
+            reloadsDrained = activeQuotaViewReloads == 0
+                ? Task.CompletedTask
+                : quotaViewReloadsDrained.Task;
+        }
+
+        SettingsState.StateChanged -= OnStateChanged;
+        Profiles.StateChanged -= OnStateChanged;
+        Quotas.StateChanged -= OnQuotaStateChanged;
+        ResetNews.StateChanged -= OnLocalIdentityStateChanged;
+        AutoUse.StateChanged -= OnLocalIdentityStateChanged;
+        LocalIdentity.StateChanged -= OnLocalIdentityStateChanged;
+        pageLifetimeCancellation.Cancel();
+        await LocalIdentity.StopMonitoringAsync();
+        if (desktopProcessPolling is not null) {
+            try {
+                await desktopProcessPolling;
+            } catch (OperationCanceledException) when (pageLifetimeCancellation.IsCancellationRequested) {
+            }
+        }
+        loginCancellation?.Cancel();
+        loginCancellation?.Dispose();
+        await reloadsDrained;
+        quotaViewGate.Dispose();
+        pageLifetimeCancellation.Dispose();
+    }
+
+    private async Task AddAccountAsync() {
+        if (isSubmitting || isAdding) {
+            return;
+        }
+
+        isAdding = true;
+        operationError = null;
+        loginCancellation = new CancellationTokenSource();
+        try {
+            CodexAccountProfile profile = await Profiles.AddAsync(newAlias, loginCancellation.Token);
+            newAlias = null;
+            await ReloadCatalogAsync();
+            QuotaSnapshotView quota = await Quotas.RefreshAsync(profile.AccountId, CancellationToken.None);
+            await ReloadQuotaViewsAsync();
+            Snackbar.Add("Codex 額度帳號已加入。", Severity.Success);
+            if (quota.Status is not QuotaDisplayStatus.Fresh) {
+                operationError = quota.Message ?? "額度尚未成功讀取；之後可再手動刷新。";
+            }
+        } catch (OperationCanceledException) {
+            operationError = "登入已取消；沒有新增帳號。";
+        } catch (CodexProfileOperationException exception) {
+            operationError = exception.Message;
+            await ReloadCatalogAsync();
+        } catch (Exception) {
+            operationError = "無法加入或讀取 Codex 帳號。請檢查應用程式設定後重試。";
+            await ReloadCatalogAsync();
+        } finally {
+            isAdding = false;
+            loginCancellation?.Dispose();
+            loginCancellation = null;
+        }
+    }
+
+    private void CancelLogin() {
+        loginCancellation?.Cancel();
+    }
+
+    private Task SetLoginDialogVisible(bool visible) {
+        if (!visible) {
+            CancelLogin();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task SetNewAlias(string? value) {
+        newAlias = value;
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveAliasAsync(Guid accountId) {
+        if (isSubmitting) {
+            return;
+        }
+
+        isSubmitting = true;
+        operationError = null;
+        try {
+            await Profiles.UpdateAliasAsync(accountId, aliasValues.GetValueOrDefault(accountId), CancellationToken.None);
+            await ReloadCatalogAsync();
+            Snackbar.Add("帳號別名已保存。", Severity.Success);
+        } catch (CodexProfileOperationException exception) {
+            operationError = exception.Message;
+        } finally {
+            isSubmitting = false;
+        }
+    }
+
+    private async Task RefreshQuotaAsync(Guid accountId) {
+        if (isSubmitting) {
+            return;
+        }
+
+        isSubmitting = true;
+        operationError = null;
+        try {
+            QuotaSnapshotView view = await Quotas.RefreshAsync(accountId, CancellationToken.None);
+            quotaViews[accountId] = view;
+            if (view.Status == QuotaDisplayStatus.Fresh) {
+                creditRefreshRequired.Remove(accountId);
+                Snackbar.Add("Codex 額度已更新。", Severity.Success);
+            }
+        } catch (Exception) {
+            operationError = "無法刷新 Codex 額度。請稍後重試。";
+        } finally {
+            isSubmitting = false;
+            await ReloadQuotaViewsAsync();
+        }
+    }
+
+    private void BeginUseCredit(Guid accountId) {
+        CodexAccountProfile? profile = SettingsState.Accounts.FirstOrDefault(item => item.AccountId == accountId);
+        QuotaSnapshotRecord? record = GetQuota(accountId)?.Snapshot;
+        QuotaSuccessfulSnapshot? snapshot = record?.LastSuccessfulSnapshot;
+        if (isSubmitting || creditRefreshRequired.Contains(accountId) || profile is null || record is null
+            || record.ProfileRevision != profile.ProfileRevision
+            || snapshot?.ResetCredits is not ResetCreditSummary { AvailableCount: > 0 } credits) {
+            return;
+        }
+
+        creditAccountId = accountId;
+        creditProfileRevision = record.ProfileRevision;
+        creditSnapshot = snapshot;
+        creditId = (credits.Credits ?? []).Where(item => item.Status == "available")
+            .OrderBy(item => item.ExpiresAtUtc is null).ThenBy(item => item.ExpiresAtUtc).FirstOrDefault()?.Id;
+    }
+
+    private Task SetCreditDialogVisible(bool visible) {
+        if (!visible && !isSubmitting) {
+            CancelCredit();
+        }
+        return Task.CompletedTask;
+    }
+
+    private void CancelCredit() {
+        if (!isSubmitting) {
+            creditAccountId = null;
+        }
+    }
+
+    private async Task ConfirmCreditAsync() {
+        if (isSubmitting || creditAccountId is not Guid accountId) {
+            return;
+        }
+        isSubmitting = true;
+        try {
+            string result = await Quotas.ConsumeResetCreditAsync(accountId, creditProfileRevision, creditId, CancellationToken.None);
+            string message = result switch {
+                "reset" => "重置成功",
+                "resetRefreshFailed" => "重置成功，但額度刷新失敗，請手動刷新。",
+                "nothingToReset" => "目前沒有可重置的視窗",
+                "noCredit" => "沒有可用重置券",
+                "alreadyRedeemed" => "此操作已完成重置",
+                "profileChanged" => "帳號資料已變更，請重新刷新額度。",
+                _ => "重置失敗。"
+            };
+            Snackbar.Add(message, result is "reset" or "resetRefreshFailed" ? Severity.Success : Severity.Info);
+            creditAccountId = null;
+            await ReloadQuotaViewsAsync();
+        } catch (CodexAppServerRpcException) {
+            operationError = "重置失敗。";
+            creditAccountId = null;
+        } catch (Exception) {
+            operationError = "重置結果未確認，請先刷新額度再決定是否重試。";
+            creditRefreshRequired.Add(accountId);
+            creditAccountId = null;
+        } finally {
+            isSubmitting = false;
+        }
+    }
+
+    private void BeginRemove(Guid accountId) {
+        confirmRemoveAccountId = accountId;
+    }
+
+    private void CancelRemove() {
+        confirmRemoveAccountId = null;
+    }
+
+    private Task SetRemoveDialogVisible(bool visible) {
+        if (!visible) {
+            CancelRemove();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task RemoveAccountAsync(Guid accountId) {
+        if (isSubmitting) {
+            return;
+        }
+
+        CodexAccountProfile? account = SettingsState.Accounts.FirstOrDefault(candidate => candidate.AccountId == accountId);
+        if (account is null) {
+            operationError = "帳號清單已更新，找不到要移除的帳號；請重新載入後再試。";
+            confirmRemoveAccountId = null;
+            return;
+        }
+
+        isSubmitting = true;
+        operationError = null;
+        try {
+            await Profiles.RemoveAsync(accountId, CancellationToken.None);
+            await DesktopSwitch.ForgetAsync(accountId, CancellationToken.None);
+            await ReloadDesktopStateAsync();
+            confirmRemoveAccountId = null;
+            quotaViews.Remove(accountId);
+            aliasValues.Remove(accountId);
+            await ReloadCatalogAsync();
+            Snackbar.Add("Codex 額度帳號已移除。", Severity.Success);
+        } catch (CodexProfileOperationException exception) {
+            operationError = exception.Message;
+            await ReloadCatalogAsync();
+        } finally {
+            isSubmitting = false;
+        }
+    }
+
+    private async Task ReloadDesktopStateAsync() {
+        try {
+            desktopState = await DesktopSwitch.GetStateAsync(pageLifetimeCancellation.Token);
+        } catch (OperationCanceledException) when (pageLifetimeCancellation.IsCancellationRequested) {
+        } catch (Exception) {
+            desktopState = null;
+            operationError = "無法讀取已保存的 Codex Desktop 登入。請重新整理頁面後再試。";
+        }
+    }
+
+    private bool HasDesktopSnapshot(Guid? accountId) {
+        return accountId is Guid id && desktopState?.AccountsWithSnapshot.Contains(id) == true;
+    }
+
+    private int DaysSince(DateTimeOffset value) {
+        DateTime today = Clock.UtcNow.ToOffset(TimeSpan.FromHours(8)).Date;
+        DateTime date = value.ToOffset(TimeSpan.FromHours(8)).Date;
+        return (today - date).Days;
+    }
+
+    private bool CanSwitchTo(CodexAccountProfile account) {
+        return SwitchDisabledReason(account) is null;
+    }
+
+    private string? SwitchDisabledReason(CodexAccountProfile account) {
+        if (desktopState is null) {
+            return "正在讀取 Desktop 登入狀態。";
+        }
+
+        if (desktopState.RecoveryRequired) {
+            return "有未完成的切換，請先還原 Desktop 登入。";
+        }
+
+        if (LocalIdentitySnapshot.MatchedProfileAccountId == account.AccountId) {
+            return "Codex Desktop 目前已使用此帳號。";
+        }
+
+        if (!HasDesktopSnapshot(account.AccountId)) {
+            return "尚未保存此帳號的 Desktop 登入。請在 Codex Desktop 登入此帳號後按「保存目前 Desktop 登入」。";
+        }
+
+        if (LocalIdentitySnapshot.Status != CodexLocalIdentityStatus.Matched) {
+            return "Codex Desktop 目前的登入尚未對應到已保存帳號，切換會覆蓋它，請先加入並保存該帳號。";
+        }
+
+        return null;
+    }
+
+    private string SwitchSourceDisplayName => LocalIdentitySnapshot.MatchedProfileAccountId is Guid sourceId
+        && SettingsState.Accounts.FirstOrDefault(account => account.AccountId == sourceId) is CodexAccountProfile source
+            ? GetAccountDisplayName(source)
+            : LocalIdentitySnapshot.MaskedIdentity ?? "目前帳號";
+
+    private string SwitchTargetDisplayName => switchTargetAccountId is Guid targetId
+        && SettingsState.Accounts.FirstOrDefault(account => account.AccountId == targetId) is CodexAccountProfile target
+            ? GetAccountDisplayName(target)
+            : "目標帳號";
+
+    private void BeginSwitch(Guid accountId) {
+        CodexAccountProfile? account = SettingsState.Accounts.FirstOrDefault(candidate => candidate.AccountId == accountId);
+        if (!isSubmitting && account is not null && CanSwitchTo(account)) {
+            switchTargetAccountId = accountId;
+        }
+    }
+
+    private Task SetSwitchDialogVisible(bool visible) {
+        if (!visible && !isSubmitting) {
+            switchTargetAccountId = null;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task CancelSwitch() {
+        if (!isSubmitting) {
+            switchTargetAccountId = null;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ConfirmSwitchAsync() {
+        if (switchTargetAccountId is not Guid targetId) {
+            return;
+        }
+
+        await RunDesktopActionAsync(DesktopAction.Switch, () => DesktopSwitch.SwitchAsync(targetId, CancellationToken.None));
+        switchTargetAccountId = null;
+    }
+
+    private Task CaptureDesktopLoginAsync() {
+        return RunDesktopActionAsync(DesktopAction.Capture, () => DesktopSwitch.CaptureCurrentAsync(CancellationToken.None));
+    }
+
+    private Task RecoverDesktopAsync() {
+        return RunDesktopActionAsync(DesktopAction.Recover, () => DesktopSwitch.RecoverAsync(CancellationToken.None));
+    }
+
+    private async Task RunDesktopActionAsync(
+        DesktopAction action,
+        Func<Task<CodexDesktopSwitchService.OperationResult>> operation
+    ) {
+        if (isSubmitting) {
+            return;
+        }
+
+        isSubmitting = true;
+        desktopAction = action;
+        operationError = null;
+        try {
+            CodexDesktopSwitchService.OperationResult result = await operation();
+            if (result.Outcome == CodexDesktopSwitchService.Outcome.Succeeded) {
+                Snackbar.Add(result.Message, Severity.Success);
+            } else {
+                operationError = result.Message;
+            }
+        } catch (Exception) {
+            operationError = action switch {
+                DesktopAction.Capture => "無法保存 Codex Desktop 登入，請重新讀取後再試。",
+                DesktopAction.Recover => "無法還原 Codex Desktop 登入，交易紀錄已保留供重試。",
+                _ => "Codex Desktop 切換未完成。若頁面顯示需要還原，請依提示還原 Desktop 登入。"
+            };
+        } finally {
+            desktopAction = DesktopAction.None;
+            isSubmitting = false;
+        }
+
+        await ReloadDesktopStateAsync();
+        try {
+            await LocalIdentity.ReadCurrentSnapshotAsync(pageLifetimeCancellation.Token);
+            await LocalIdentity.ReadProcessStatusAsync(pageLifetimeCancellation.Token);
+        } catch (OperationCanceledException) when (pageLifetimeCancellation.IsCancellationRequested) {
+        }
+    }
+
+    private enum DesktopAction {
+        None,
+        Capture,
+        Switch,
+        Recover
+    }
+
+    private async Task RetryCatalogAsync() {
+        await ReloadCatalogAsync();
+    }
+
+    private async Task ReloadCatalogAsync() {
+        await SettingsState.RetryLoadAsync(CancellationToken.None);
+        await ReloadQuotaViewsAsync();
+        if (Volatile.Read(ref disposed) == 0) {
+            try {
+                await LocalIdentity.ReadCurrentSnapshotAsync(pageLifetimeCancellation.Token);
+            } catch (OperationCanceledException) when (
+                pageLifetimeCancellation.IsCancellationRequested
+                || LocalIdentity.CurrentSnapshot.IsMonitoring
+            ) {
+            }
+        }
+    }
+
+    private Task MoveAccountUpAsync(Guid accountId) {
+        return MoveAccountAsync(accountId, CodexAccountMoveDirection.Up);
+    }
+
+    private Task MoveAccountDownAsync(Guid accountId) {
+        return MoveAccountAsync(accountId, CodexAccountMoveDirection.Down);
+    }
+
+    private async Task MoveAccountAsync(Guid accountId, CodexAccountMoveDirection direction) {
+        if (isSubmitting) {
+            return;
+        }
+
+        isSubmitting = true;
+        operationError = null;
+        try {
+            await Profiles.MoveAsync(accountId, direction, CancellationToken.None);
+            await ReloadCatalogAsync();
+            Snackbar.Add("帳號順序已保存。", Severity.Success);
+        } catch (CodexProfileOperationException exception) {
+            operationError = exception.Message;
+            await ReloadCatalogAsync();
+        } finally {
+            isSubmitting = false;
+        }
+    }
+
+    private async Task ReadLocalIdentityAsync() {
+        if (IsReadingIdentity || Volatile.Read(ref disposed) != 0) {
+            return;
+        }
+
+        try {
+            await LocalIdentity.ReadCurrentSnapshotAsync(pageLifetimeCancellation.Token);
+        } catch (OperationCanceledException) when (
+            pageLifetimeCancellation.IsCancellationRequested
+            || LocalIdentity.CurrentSnapshot.IsMonitoring
+        ) {
+        }
+    }
+
+    private async Task PollDesktopProcessStatusAsync(CancellationToken cancellationToken) {
+        try {
+            while (true) {
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                await LocalIdentity.ReadProcessStatusAsync(cancellationToken);
+            }
+        } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+        }
+    }
+
+    private CodexLocalIdentitySnapshot LocalIdentitySnapshot => LocalIdentity.CurrentSnapshot;
+
+    private bool IsReadingIdentity => LocalIdentitySnapshot.Status == CodexLocalIdentityStatus.Loading;
+
+    private bool HasFeedback => SettingsState.CatalogError is not null
+        || operationError is not null
+        || desktopState?.RecoveryRequired == true
+        || HasQuotaFeedback
+        || (LocalIdentitySnapshot.IsMonitoring && !LocalIdentitySnapshot.IsMonitoringAvailable)
+        || IsLocalIdentityError;
+
+    private bool HasQuotaFeedback => SettingsState.Accounts.Any(account =>
+        !string.IsNullOrWhiteSpace(GetQuota(account.AccountId)?.Message)
+    );
+
+    private bool IsLocalIdentityError => LocalIdentitySnapshot.Status is not (
+        CodexLocalIdentityStatus.NotChecked
+        or CodexLocalIdentityStatus.Loading
+        or CodexLocalIdentityStatus.Matched
+        or CodexLocalIdentityStatus.Unmatched
+        or CodexLocalIdentityStatus.Ambiguous
+    );
+
+    private bool IsRemoveDialogOpen => confirmRemoveAccountId.HasValue;
+
+    private CodexAccountProfile? RemovingAccount => confirmRemoveAccountId is Guid accountId
+        ? SettingsState.Accounts.FirstOrDefault(account => account.AccountId == accountId)
+        : null;
+
+    private string DesktopProcessStatusText => LocalIdentity.ProcessStatusSnapshot.Status switch {
+        CodexDesktopProcessStatus.Running => "執行中",
+        CodexDesktopProcessStatus.NotRunning => "未執行",
+        _ => "無法確認"
+    };
+
+    private static string GetLocalIdentityMessage(CodexLocalIdentityStatus status) {
+        return status switch {
+            CodexLocalIdentityStatus.NotChecked => "尚未檢查本機登入資料。",
+            CodexLocalIdentityStatus.Loading => "正在讀取本機登入資料。",
+            CodexLocalIdentityStatus.Matched => "本機登入資料唯一符合一筆已保存額度帳號。",
+            CodexLocalIdentityStatus.Unmatched => "本機登入資料未對應已保存的額度帳號。",
+            CodexLocalIdentityStatus.Ambiguous => "本機登入資料對應到多筆額度帳號，未標記任何卡片。",
+            CodexLocalIdentityStatus.CatalogUnavailable => "無法讀取額度帳號清單，無法完成本機登入資料比對。",
+            CodexLocalIdentityStatus.FileMissing => "未找到本機登入資料。這不代表 Codex Desktop 已登出。",
+            CodexLocalIdentityStatus.InvalidFormat => "本機登入資料格式錯誤，未標記任何帳號。",
+            CodexLocalIdentityStatus.UnsupportedAuth => "本機登入資料格式不受支援，未標記任何帳號。",
+            CodexLocalIdentityStatus.IdentityUnavailable => "本機登入資料缺少可辨識的帳號資訊，未標記任何帳號。",
+            CodexLocalIdentityStatus.ConflictingClaims => "本機登入資料中的帳號資訊互相矛盾，未標記任何帳號。",
+            CodexLocalIdentityStatus.FileTooLarge => "本機登入資料超過安全讀取大小，未標記任何帳號。",
+            CodexLocalIdentityStatus.UnsafePath => "本機登入資料路徑不安全，未標記任何帳號。",
+            CodexLocalIdentityStatus.SharingViolation => "本機登入資料目前無法讀取，請稍後重新讀取。",
+            CodexLocalIdentityStatus.AccessDenied => "目前沒有權限讀取本機登入資料。",
+            CodexLocalIdentityStatus.ChangedDuringRead => "本機登入資料在讀取期間持續變動，請重新讀取。",
+            _ => "無法讀取本機登入資料，請重新讀取。"
+        };
+    }
+
+    private static Severity GetQuotaMessageSeverity(QuotaDisplayStatus status) {
+        return status switch {
+            QuotaDisplayStatus.ReauthenticationRequired or QuotaDisplayStatus.Error => Severity.Error,
+            QuotaDisplayStatus.Stale or QuotaDisplayStatus.Incomplete => Severity.Warning,
+            _ => Severity.Info
+        };
+    }
+
+    private async Task ReloadQuotaViewsAsync() {
+        lock (quotaViewLifetimeSync) {
+            if (disposed != 0) {
+                return;
+            }
+
+            activeQuotaViewReloads++;
+        }
+
+        bool gateAcquired = false;
+        try {
+            await quotaViewGate.WaitAsync();
+            gateAcquired = true;
+            if (Volatile.Read(ref disposed) != 0) {
+                return;
+            }
+
+            foreach (CodexAccountProfile account in SettingsState.Accounts) {
+                QuotaSnapshotView quota = await Quotas.GetViewAsync(account.AccountId, CancellationToken.None);
+                lock (quotaViewLifetimeSync) {
+                    if (disposed != 0) {
+                        return;
+                    }
+
+                    quotaViews[account.AccountId] = quota;
+                }
+            }
+
+            HashSet<Guid> currentIds = SettingsState.Accounts.Select(account => account.AccountId).ToHashSet();
+            lock (quotaViewLifetimeSync) {
+                if (disposed == 0) {
+                    foreach (Guid staleId in quotaViews.Keys.Where(id => !currentIds.Contains(id)).ToArray()) {
+                        quotaViews.Remove(staleId);
+                    }
+                }
+            }
+        } finally {
+            if (gateAcquired) {
+                quotaViewGate.Release();
+            }
+
+            lock (quotaViewLifetimeSync) {
+                activeQuotaViewReloads--;
+                if (disposed != 0 && activeQuotaViewReloads == 0) {
+                    quotaViewReloadsDrained.TrySetResult(true);
+                }
+            }
+        }
+    }
+
+    private QuotaSnapshotView? GetQuota(Guid accountId) {
+        return quotaViews.GetValueOrDefault(accountId);
+    }
+
+    private string? GetAlias(CodexAccountProfile account) {
+        if (!aliasValues.TryGetValue(account.AccountId, out string? value)) {
+            value = account.Alias;
+            aliasValues.Add(account.AccountId, value);
+        }
+
+        return value;
+    }
+
+    private static string GetAccountDisplayName(CodexAccountProfile account) {
+        return string.IsNullOrWhiteSpace(account.Alias) ? account.MaskedIdentity : account.Alias;
+    }
+
+    private void SetAlias(Guid accountId, string? value) {
+        aliasValues[accountId] = value;
+    }
+
+    private void OnStateChanged(object? sender, EventArgs e) {
+        ScheduleQuotaViewReload();
+    }
+
+    private void OnQuotaStateChanged(object? sender, EventArgs e) {
+        ScheduleQuotaViewReload();
+    }
+
+    private void OnLocalIdentityStateChanged(object? sender, EventArgs e) {
+        if (Volatile.Read(ref disposed) == 0) {
+            _ = InvokeAsync(() => {
+                if (Volatile.Read(ref disposed) == 0) {
+                    StateHasChanged();
+                }
+            });
+        }
+    }
+
+    private void ScheduleQuotaViewReload() {
+        lock (quotaViewLifetimeSync) {
+            if (disposed != 0) {
+                return;
+            }
+
+            _ = InvokeAsync(async () => {
+                if (Volatile.Read(ref disposed) != 0) {
+                    return;
+                }
+
+                await ReloadQuotaViewsAsync();
+                lock (quotaViewLifetimeSync) {
+                    if (disposed == 0) {
+                        StateHasChanged();
+                    }
+                }
+            });
+        }
+    }
+}

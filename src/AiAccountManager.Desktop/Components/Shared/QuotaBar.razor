@@ -1,0 +1,39 @@
+<div class="quota-bar" data-level="@LevelKey" aria-label="@AccessibleName">
+    <div class="quota-bar-heading">
+        <MudText Typo="Typo.subtitle2">@Label</MudText>
+        <span class="quota-bar-value">
+            <span class="quota-bar-level">@QuotaLevel.TextForRemaining(RemainingPercent)</span>
+            <strong>@FormatPercent(RemainingPercent)% 剩餘</strong>
+        </span>
+    </div>
+    <MudProgressLinear Value="@RemainingPercent"
+                       Color="@QuotaLevel.ForRemaining(RemainingPercent)"
+                       Rounded="true"
+                       Size="Size.Medium" />
+    @if (!string.IsNullOrWhiteSpace(ResetText)) {
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">重設：@ResetText</MudText>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = null!;
+
+    [Parameter]
+    public double RemainingPercent { get; set; }
+
+    [Parameter]
+    public string? ResetText { get; set; }
+
+    private string LevelKey => QuotaLevel.ForRemaining(RemainingPercent) switch {
+        Color.Success => "healthy",
+        Color.Warning => "low",
+        _ => "critical"
+    };
+
+    private string AccessibleName => $"{Label}，{FormatPercent(RemainingPercent)}% 剩餘，{QuotaLevel.TextForRemaining(RemainingPercent)}";
+
+    private static string FormatPercent(double value) {
+        return value.ToString("0.#", CultureInfo.CurrentCulture);
+    }
+}

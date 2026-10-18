@@ -1,0 +1,1053 @@
+@page "/claude"
+@using CloudyWing.AiAccountManager.Application.Claude
+@using CloudyWing.AiAccountManager.Desktop.Components.Claude
+@implements IAsyncDisposable
+@inject ClaudeAccountService Accounts
+@inject ClaudeDesktopSwitchService Switches
+@inject ClaudeQuotaService Quotas
+@inject SettingsService SettingsState
+@inject IJSRuntime Js
+
+<PageTitle>Claude 帳號</PageTitle>
+<MudStack Spacing="4" Class="page-stack">
+    <header class="page-heading">
+        <MudText Typo="Typo.h4">Claude 帳號</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">切換 Claude Desktop 登入帳號，切換時同步 Code 分頁的 Session 清單，並查詢各帳號額度。</MudText>
+    </header>
+    @if (!string.IsNullOrWhiteSpace(pageError) || !string.IsNullOrWhiteSpace(operationMessage)) {
+        <div class="claude-feedback-region" role="region" aria-label="Claude 頁面訊息">
+            @if (!string.IsNullOrWhiteSpace(pageError)) {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Spacing="2">
+                        <MudText Typo="Typo.body2">@pageError</MudText>
+                        <MudButton Color="Color.Error" Variant="Variant.Text" Disabled="@isBusy" OnClick="RetryLoadAsync">重新載入</MudButton>
+                    </MudStack>
+                </MudAlert>
+            }
+            @if (!string.IsNullOrWhiteSpace(operationMessage)) {
+                <MudAlert Severity="@operationSeverity" Variant="Variant.Outlined">@operationMessage</MudAlert>
+            }
+        </div>
+    }
+
+    @if (isPageLoading && pageState is null) {
+        <MudPaper Elevation="0" Outlined="true" Class="content-card">
+            <MudStack Spacing="2">
+                <MudText Typo="Typo.h6">正在讀取 Claude Desktop 帳號</MudText>
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">正在檢查本機 Desktop profile 與已保存帳號。</MudText>
+            </MudStack>
+        </MudPaper>
+    } else if (pageState is not null) {
+        @if (isPageLoading) {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">正在讀取最新 Claude Desktop 狀態。</MudText>
+        }
+        <MudPaper Elevation="0" Outlined="true" Class="content-card identity-banner claude-current-identity" data-provider="claude">
+            <MudStack Spacing="2">
+                <div class="identity-banner-heading">
+                    <MudIcon Icon="@Icons.Material.Outlined.DesktopWindows" Class="identity-banner-icon" />
+                    <div class="identity-banner-text">
+                        <MudText Typo="Typo.overline" Class="mud-text-secondary">目前 Claude Desktop 身分</MudText>
+                        <MudText Typo="Typo.h6">
+                            @(pageState.CurrentIdentity.MatchedProfile is ClaudeAccountProfile matchedProfile
+                                ? GetProfileDisplayName(matchedProfile)
+                                : string.IsNullOrWhiteSpace(pageState.CurrentIdentity.MaskedEmail) ? "未知" : pageState.CurrentIdentity.MaskedEmail)
+                        </MudText>
+                    </div>
+                    <div class="identity-banner-actions">
+                        <MudChip T="string" Color="@IdentityStatusColor(pageState.CurrentIdentity.Status)" Variant="Variant.Outlined" Size="Size.Small">
+                            @IdentityStatusText(pageState.CurrentIdentity.Status)
+                        </MudChip>
+                        <MudChip T="string" Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small">
+                            程序：@ProcessStatusText(pageState.ProcessStatus)
+                        </MudChip>
+                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh" Disabled="@(isBusy || !hasLoadedPage)" OnClick="ReloadCurrentIdentityAsync">
+                            @(isBusy && activeAction == PageAction.Reload ? "正在讀取…" : "重新讀取身分")
+                        </MudButton>
+                    </div>
+                </div>
+                <MudText Typo="Typo.body2">@(pageState.CurrentIdentity.Message ?? IdentityStatusMessage(pageState.CurrentIdentity.Status))</MudText>
+                <details class="identity-banner-details">
+                    <summary>辨識明細</summary>
+                    <dl class="account-detail-list">
+                        <div>
+                            <dt>辨識來源</dt>
+                            <dd>本機 Claude Desktop 設定與 profile API</dd>
+                        </div>
+                        <div>
+                            <dt>身分</dt>
+                            <dd>@(string.IsNullOrWhiteSpace(pageState.CurrentIdentity.MaskedEmail) ? "未知" : pageState.CurrentIdentity.MaskedEmail)</dd>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(pageState.CurrentIdentity.AccountUuid)) {
+                            <div>
+                                <dt>Account UUID</dt>
+                                <dd>@FormatIdentifier(pageState.CurrentIdentity.AccountUuid)</dd>
+                            </div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(pageState.CurrentIdentity.OrganizationUuid)) {
+                            <div>
+                                <dt>Organization UUID</dt>
+                                <dd>@FormatIdentifier(pageState.CurrentIdentity.OrganizationUuid)</dd>
+                            </div>
+                        }
+                        <div>
+                            <dt>身分證據時間</dt>
+                            <dd>@FormatDateTime(pageState.CurrentIdentity.VerifiedAtUtc)</dd>
+                        </div>
+                    </dl>
+                </details>
+
+                @if (IsRecoveryRequired) {
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">
+                        <MudStack Spacing="2">
+                            <MudText Typo="Typo.body2">偵測到尚未完成的切換交易。復原完成前會停用 profile 保存與新切換。</MudText>
+                            @if (pageState.PendingTransaction is ClaudeSwitchTransaction transaction) {
+                                <details>
+                                    <summary>交易識別與復原資訊</summary>
+                                    <MudStack Spacing="1" Class="mud-pt-2">
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">交易 ID：@FormatIdentifier(transaction.TransactionId.ToString("N"))</MudText>
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">來源 profile：@FormatIdentifier(transaction.SourceProfileId.ToString("N"))</MudText>
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">目標 profile：@FormatIdentifier(transaction.TargetProfileId.ToString("N"))</MudText>
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">交易階段：@transaction.CurrentStage</MudText>
+                                        @if (!string.IsNullOrWhiteSpace(transaction.FailureCode)) {
+                                            <MudText Typo="Typo.caption" Class="mud-text-secondary">狀態碼：@transaction.FailureCode</MudText>
+                                        }
+                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">最近更新：@FormatDateTime(transaction.UpdatedAtUtc)</MudText>
+                                    </MudStack>
+                                </details>
+                            }
+                            <MudButton Color="Color.Error" Variant="Variant.Text" Disabled="@(isBusy || !hasLoadedPage)" OnClick="RecoverPendingSwitchAsync">
+                                @(isBusy && activeAction == PageAction.Recover ? "正在復原…" : "重試復原")
+                            </MudButton>
+                        </MudStack>
+                    </MudAlert>
+                }
+
+                @if (IsCleanupPending) {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                        <MudStack Spacing="2">
+                            <MudText Typo="Typo.body2">帳號切換已完成，僅待清理這筆交易的 history 暫存。清理期間不會回復目標帳號，也不能開始新切換。</MudText>
+                            @if (pageState.PendingTransaction is ClaudeSwitchTransaction transaction) {
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary">交易 ID：@FormatIdentifier(transaction.TransactionId.ToString("N"))</MudText>
+                            }
+                            <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(isBusy || !hasLoadedPage)" OnClick="RecoverPendingSwitchAsync">
+                                @(isBusy && activeAction == PageAction.Recover ? "正在清理…" : "重試暫存清理")
+                            </MudButton>
+                        </MudStack>
+                    </MudAlert>
+                }
+            </MudStack>
+        </MudPaper>
+
+        @if (isBusy) {
+            <MudPaper Elevation="0" Outlined="true" Class="content-card">
+                <MudStack Spacing="2">
+                    <MudText Typo="Typo.body2">@ActiveActionText</MudText>
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                </MudStack>
+            </MudPaper>
+        }
+
+        @if (pageState.Profiles.Count == 0) {
+            <MudPaper Elevation="0" Outlined="true" Class="content-card empty-state">
+                <MudText Typo="Typo.h6">尚未保存 Claude Desktop 帳號</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                    請先在 Claude Desktop 登入，再保存目前帳號。系統只會保存經 profile API 驗證的 Desktop 身分。
+                </MudText>
+            </MudPaper>
+        } else {
+            <div class="account-list-heading">
+                <MudText Typo="Typo.h6">已保存帳號</MudText>
+                <MudChip T="string" Color="Color.Default" Variant="Variant.Text" Size="Size.Small">@pageState.Profiles.Count 個</MudChip>
+            </div>
+            @for (int index = 0; index < pageState.Profiles.Count; index++) {
+                ClaudeAccountProfile profile = pageState.Profiles[index];
+                ClaudeQuotaSnapshot.View? quota = GetQuotaView(profile.ProfileId);
+                bool isCurrentProfile = pageState.CurrentIdentity.Status == ClaudeAccountService.IdentityStatus.Verified
+                    && pageState.CurrentIdentity.MatchedProfile?.ProfileId == profile.ProfileId;
+
+                <div @key="profile.ProfileId" id="@(AccountNavigation.ElementId("claude", profile.ProfileId))">
+                <ClaudeAccountCard
+                                   DisplayName="@GetProfileDisplayName(profile)"
+                                   MaskedIdentity="@profile.MaskedEmail"
+                                   Alias="@profile.Alias"
+                                   OrganizationDisplayName="@FormatIdentifier(profile.OrganizationUuid)"
+                                   IdentityEvidenceText="@GetProfileEvidenceText(profile)"
+                                   IdentityStatusText="@ProfileStatusText(profile.Status)"
+                                   IdentityStatusColor="@ProfileStatusColor(profile.Status)"
+                                   IsCurrentDesktopProfile="@isCurrentProfile"
+                                   IsSelectedForSwitch="@(switchTargetProfileId == profile.ProfileId)"
+                                   IsBusy="@(isBusy || !hasLoadedPage)"
+                                   QuotaStatusText="@QuotaStatusText(quota?.Status)"
+                                   QuotaStatusColor="@QuotaStatusColor(quota?.Status)"
+                                   IsQuotaLoading="@(isBusy && activeAction == PageAction.RefreshQuota && activeQuotaProfileId == profile.ProfileId)"
+                                   QuotaWindows="@GetQuotaWindows(quota)"
+                                   ResetGrants="@(quota?.Status == ClaudeQuotaSnapshot.RefreshStatus.Fresh ? quota.Snapshot?.ResetGrants : null)"
+                                   QuotaMessageSeverity="@QuotaMessageSeverity(quota?.Status)"
+                                   QuotaMessage="@GetQuotaMessage(quota)"
+                                   QuotaSourceText="@GetProfileDisplayName(profile)"
+                                   QuotaCheckedAtText="@GetQuotaCheckedAtText(quota)"
+                                   QuotaUpdatedAt="@(quota?.Snapshot?.RetrievedAtUtc)"
+                                   CanRefreshQuota="@CanRefreshQuota(profile)"
+                                   CanRequestSwitch="@CanRequestSwitch(profile)"
+                                   SwitchDisabledReason="@SwitchDisabledReason(profile)"
+                                   OnRefreshQuota="@(() => RefreshQuotaAsync(profile))"
+                                   OnRequestSwitch="@(() => PreviewSwitchAsync(profile))"
+                                   CanMoveUp="@(index > 0)"
+                                   CanMoveDown="@(index < pageState.Profiles.Count - 1)"
+                                   CanEditCatalog="@CanEditCatalog"
+                                   CatalogDisabledReason="@CatalogDisabledReason"
+                                   OnSaveAlias="@(alias => UpdateAliasAsync(profile, alias))"
+                                   OnMoveUp="@(() => MoveProfileAsync(profile, ClaudeAccountService.MoveDirection.Up))"
+                                   OnMoveDown="@(() => MoveProfileAsync(profile, ClaudeAccountService.MoveDirection.Down))"
+                                   OnRemove="@(() => BeginRemove(profile))" />
+                </div>
+            }
+        }
+
+        <MudPaper Elevation="0" Outlined="true" Class="content-card add-account-card">
+            <MudText Typo="Typo.h6">保存目前 Desktop 帳號</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                在 Claude Desktop 登入要加入的帳號並正常結束程式，再保存其登入快照。快照以目前 Windows 使用者的 DPAPI 保護。
+            </MudText>
+            <MudTextField T="string"
+                          Label="帳號別名（選填）"
+                          Value="@newAlias"
+                          ValueChanged="SetNewAlias"
+                          Disabled="@(!CanCaptureCurrentProfile)" />
+            <div>
+                <MudButton Color="Color.Primary"
+                           Variant="Variant.Filled"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           Disabled="@(!CanCaptureCurrentProfile)"
+                           OnClick="CaptureCurrentProfileAsync">
+                    @(isBusy && activeAction == PageAction.Capture ? "正在保存…" : "保存目前 Desktop 帳號")
+                </MudButton>
+            </div>
+            @if (!CanCaptureCurrentProfile && !string.IsNullOrWhiteSpace(CaptureDisabledReason)) {
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@CaptureDisabledReason</MudText>
+            }
+        </MudPaper>
+    }
+</MudStack>
+
+<ClaudeRemoveAccountDialog Visible="@(removingProfile is not null)"
+                           VisibleChanged="SetRemoveDialogVisible"
+                           Profile="@removingProfile"
+                           Busy="@(isBusy && activeAction == PageAction.Catalog)"
+                           OnConfirm="RemoveProfileAsync"
+                           OnCancel="CancelRemove" />
+
+<ClaudeSwitchConfirmationDialog Visible="@isSwitchDialogVisible"
+                                VisibleChanged="SetSwitchDialogVisibleAsync"
+                                SourceDisplayName="@SwitchSourceDisplayName"
+                                SourceIdentity="@SwitchSourceIdentity"
+                                SourceOrganization="@SwitchSourceOrganization"
+                                TargetDisplayName="@SwitchTargetDisplayName"
+                                TargetIdentity="@SwitchTargetIdentity"
+                                TargetOrganization="@SwitchTargetOrganization"
+                                CanConfirm="@(hasLoadedPage && switchPreview?.CanProceed == true && !switchActionBlocked && !IsRecoveryRequired && !IsCleanupPending)"
+                                RequiresHistoryOverwrite="@(switchPreview?.RequiresHistoryOverwrite == true)"
+                                SourceSessionCount="@switchPreview?.SourceSessionCount"
+                                TargetSessionCount="@switchPreview?.TargetSessionCount"
+                                PreviewMessage="@switchPreview?.Message"
+                                IsSubmitting="@(isBusy && (activeAction is PageAction.Switch or PageAction.Recover))"
+                                ProgressMessage="@SwitchProgressMessage"
+                                StatusMessage="@switchStatusMessage"
+                                StatusSeverity="@switchStatusSeverity"
+                                IsRecoveryRequired="@IsRecoveryRequired"
+                                RecoveryMessage="@RecoveryMessage"
+                                OnConfirm="ConfirmSwitchAsync"
+                                OnCancel="CancelSwitch"
+                                OnRecover="RecoverPendingSwitchAsync" />
+
+@code {
+    [SupplyParameterFromQuery(Name = "account")]
+    public string? AccountQuery { get; set; }
+
+    private string? handledAccountQuery;
+    private readonly CancellationTokenSource pageLifetimeCancellation = new();
+    private readonly Dictionary<Guid, ClaudeQuotaSnapshot.View> quotaViews = [];
+    private ClaudeAccountService.PageState? pageState;
+    private ClaudeDesktopSwitchService.SwitchPreview? switchPreview;
+    private ClaudeAccountProfile? removingProfile;
+    private Guid? switchTargetProfileId;
+    private Guid? activeQuotaProfileId;
+    private string? newAlias;
+    private string? pageError;
+    private string? operationMessage;
+    private Severity operationSeverity = Severity.Info;
+    private string? switchStatusMessage;
+    private Severity switchStatusSeverity = Severity.Info;
+    private PageAction activeAction;
+    private bool isBusy;
+    private bool isPageLoading = true;
+    private bool hasLoadedPage;
+    private bool entryRefreshStarted;
+    private bool isSwitchDialogVisible;
+    private bool switchActionBlocked;
+    private int disposed;
+
+    private bool IsRecoveryRequired => pageState?.RecoveryRequired == true
+        || pageState?.CurrentIdentity.Status == ClaudeAccountService.IdentityStatus.RecoveryRequired;
+
+    private bool IsCleanupPending => pageState?.CleanupPending == true;
+
+    private string ActiveActionText => activeAction switch {
+        PageAction.Capture => "正在保存並驗證目前 Claude Desktop profile。",
+        PageAction.RefreshQuota => "正在查詢所選已保存帳號的 Claude 額度。",
+        PageAction.PreviewSwitch => "正在檢查切換來源、目標與 Session 覆蓋範圍。",
+        PageAction.Switch => SwitchProgressMessage,
+        PageAction.Recover => IsCleanupPending
+            ? "正在清理已提交切換的交易暫存。"
+            : "正在復原未完成的 Claude Desktop 切換交易。",
+        PageAction.Catalog => "正在保存 Claude 帳號清單。",
+        _ => "正在讀取 Claude Desktop 狀態。"
+    };
+
+    private string SwitchProgressMessage => switchPreview?.RequiresHistoryOverwrite == true
+        ? "正在關閉 Claude Desktop、覆蓋目標 Session 清單並驗證切換結果。"
+        : "正在關閉 Claude Desktop 並驗證帳號切換結果。";
+
+    private string SwitchSourceDisplayName => switchPreview?.SourceProfile is ClaudeAccountProfile source
+        ? GetProfileDisplayName(source)
+        : pageState?.CurrentIdentity.MatchedProfile is ClaudeAccountProfile current
+            ? GetProfileDisplayName(current)
+            : "目前帳號未知";
+
+    private string SwitchSourceIdentity => switchPreview?.SourceProfile?.MaskedEmail
+        ?? pageState?.CurrentIdentity.MaskedEmail
+        ?? "未知";
+
+    private string? SwitchSourceOrganization => switchPreview?.SourceProfile is ClaudeAccountProfile source
+        ? FormatIdentifier(source.OrganizationUuid)
+        : pageState?.CurrentIdentity.OrganizationUuid is string organizationUuid
+            ? FormatIdentifier(organizationUuid)
+            : null;
+
+    private string SwitchTargetDisplayName => switchPreview?.TargetProfile is ClaudeAccountProfile target
+        ? GetProfileDisplayName(target)
+        : FindSwitchTarget() is ClaudeAccountProfile selected
+            ? GetProfileDisplayName(selected)
+            : "目標帳號未知";
+
+    private string SwitchTargetIdentity => switchPreview?.TargetProfile?.MaskedEmail
+        ?? FindSwitchTarget()?.MaskedEmail
+        ?? "未知";
+
+    private string? SwitchTargetOrganization => switchPreview?.TargetProfile is ClaudeAccountProfile target
+        ? FormatIdentifier(target.OrganizationUuid)
+        : FindSwitchTarget() is ClaudeAccountProfile selected
+            ? FormatIdentifier(selected.OrganizationUuid)
+            : null;
+
+    private string? RecoveryMessage => IsRecoveryRequired
+        ? "此交易尚未完成復原。請使用「重試復原」完成 rollback；復原成功前不會開始新切換。"
+        : null;
+
+    protected override async Task OnInitializedAsync() {
+        Quotas.StateChanged += OnQuotaStateChanged;
+        ClaudeAccountService.PageState cached = Accounts.CurrentPageState;
+        if (cached.Profiles.Count > 0 || cached.CurrentIdentity.Status != ClaudeAccountService.IdentityStatus.Unknown
+            || cached.ProcessStatus != IClaudeDesktopProcessController.ProcessStatus.Unknown || cached.PendingTransaction is not null) {
+            pageState = cached;
+            foreach (ClaudeAccountProfile profile in cached.Profiles) {
+                if (Quotas.GetCurrentView(profile.ProfileId) is ClaudeQuotaSnapshot.View view) {
+                    quotaViews[profile.ProfileId] = view;
+                }
+            }
+        }
+
+        await Task.Yield();
+        await LoadPageAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender) {
+        if (!entryRefreshStarted && hasLoadedPage && pageState is not null) {
+            entryRefreshStarted = true;
+            _ = RefreshStaleOnEntryAsync(pageState.Profiles.ToArray());
+        }
+
+        string? requested = AccountQuery;
+        if (hasLoadedPage && pageState is not null && requested != handledAccountQuery) {
+            handledAccountQuery = requested;
+            if (Guid.TryParse(requested, out Guid profileId)
+                && pageState.Profiles.Any(profile => profile.ProfileId == profileId)) {
+                await Js.InvokeVoidAsync("accountNavigation.scrollTo", pageLifetimeCancellation.Token, AccountNavigation.ElementId("claude", profileId), requested);
+            }
+        }
+    }
+
+    private async Task RefreshStaleOnEntryAsync(IReadOnlyList<ClaudeAccountProfile> profiles) {
+        int interval = SettingsState.Settings?.QuotaRefreshIntervalMinutes ?? AppSettings.Defaults.QuotaRefreshIntervalMinutes;
+        DateTimeOffset cutoff = DateTimeOffset.UtcNow.AddMinutes(-interval);
+        foreach (ClaudeAccountProfile profile in profiles) {
+            if (pageLifetimeCancellation.IsCancellationRequested) {
+                return;
+            }
+
+            ClaudeQuotaSnapshot.View? view = GetQuotaView(profile.ProfileId);
+            if (view?.Status is ClaudeQuotaSnapshot.RefreshStatus.Refreshing or ClaudeQuotaSnapshot.RefreshStatus.ReauthenticationRequired) {
+                continue;
+            }
+            if (view?.RetryAfterUtc is DateTimeOffset retryAfter && retryAfter > DateTimeOffset.UtcNow) {
+                continue;
+            }
+            if (view?.Snapshot is not null && view.Snapshot.RetrievedAtUtc >= cutoff) {
+                continue;
+            }
+
+            try {
+                _ = await Quotas.RefreshAsync(profile.ProfileId, pageLifetimeCancellation.Token);
+            } catch (OperationCanceledException) when (pageLifetimeCancellation.IsCancellationRequested) {
+                return;
+            } catch (Exception) {
+            }
+        }
+    }
+
+    public ValueTask DisposeAsync() {
+        if (Interlocked.Exchange(ref disposed, 1) == 0) {
+            Quotas.StateChanged -= OnQuotaStateChanged;
+            pageLifetimeCancellation.Cancel();
+            pageLifetimeCancellation.Dispose();
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    private async Task LoadPageAsync() {
+        if (Volatile.Read(ref disposed) != 0) {
+            return;
+        }
+
+        isPageLoading = true;
+        hasLoadedPage = false;
+
+        pageError = null;
+        try {
+            pageState = await Accounts.GetPageStateAsync(pageLifetimeCancellation.Token);
+            if (pageState.CleanupPending) {
+                ClaudeDesktopSwitchService.SwitchResult cleanupResult = await Switches
+                    .RecoverPendingSwitchAsync(pageLifetimeCancellation.Token);
+                pageState = await Accounts.GetPageStateAsync(pageLifetimeCancellation.Token);
+                operationMessage = cleanupResult.Message;
+                operationSeverity = SwitchResultSeverity(cleanupResult.Outcome);
+            }
+
+            await ReloadQuotaViewsAsync(pageState.Profiles);
+            pageState = Accounts.CurrentPageState;
+            hasLoadedPage = true;
+        } catch (OperationCanceledException) when (pageLifetimeCancellation.IsCancellationRequested) {
+        } catch (Exception) {
+            pageError = "無法載入 Claude Desktop 帳號與身分狀態，請重新載入後再試。";
+        } finally {
+            isPageLoading = false;
+        }
+    }
+
+    private async Task RetryLoadAsync() {
+        ClearOperationMessage();
+        await LoadPageAsync();
+    }
+
+    private Task SetNewAlias(string value) {
+        newAlias = value;
+        return Task.CompletedTask;
+    }
+
+    private async Task CaptureCurrentProfileAsync() {
+        if (!CanCaptureCurrentProfile) {
+            return;
+        }
+
+        await RunPageActionAsync(PageAction.Capture, async () => {
+            ClaudeAccountService.CaptureResult result = await Accounts.CaptureCurrentProfileAsync(
+                newAlias,
+                pageLifetimeCancellation.Token
+            );
+            bool succeeded = result.Outcome == ClaudeAccountService.CaptureOutcome.Saved;
+            operationMessage = result.Message;
+            operationSeverity = succeeded ? Severity.Success : Severity.Error;
+            if (succeeded) {
+                newAlias = null;
+            }
+
+            await ReloadPageStateAsync();
+        });
+    }
+
+    private async Task RefreshQuotaAsync(ClaudeAccountProfile profile) {
+        if (isBusy || !CanRefreshQuota(profile)) {
+            return;
+        }
+
+        activeQuotaProfileId = profile.ProfileId;
+        await RunPageActionAsync(PageAction.RefreshQuota, async () => {
+            ClaudeQuotaSnapshot.View view = await Quotas.RefreshAsync(profile.ProfileId, pageLifetimeCancellation.Token);
+            quotaViews[profile.ProfileId] = view;
+            operationMessage = view.Status == ClaudeQuotaSnapshot.RefreshStatus.Fresh
+                ? $"{GetProfileDisplayName(profile)} 的 Claude 額度已更新。"
+                : view.Message ?? $"{GetProfileDisplayName(profile)} 的額度狀態為 {QuotaStatusText(view.Status)}。";
+            operationSeverity = view.Status switch {
+                ClaudeQuotaSnapshot.RefreshStatus.Fresh => Severity.Success,
+                ClaudeQuotaSnapshot.RefreshStatus.Stale or ClaudeQuotaSnapshot.RefreshStatus.Incomplete => Severity.Warning,
+                ClaudeQuotaSnapshot.RefreshStatus.ReauthenticationRequired or ClaudeQuotaSnapshot.RefreshStatus.Error => Severity.Error,
+                _ => Severity.Info
+            };
+        });
+        activeQuotaProfileId = null;
+    }
+
+    private async Task PreviewSwitchAsync(ClaudeAccountProfile profile) {
+        if (isBusy || !CanRequestSwitch(profile)) {
+            return;
+        }
+
+        switchTargetProfileId = profile.ProfileId;
+        switchPreview = null;
+        switchActionBlocked = false;
+        switchStatusMessage = null;
+        await RunPageActionAsync(PageAction.PreviewSwitch, async () => {
+            switchPreview = await Switches.PreviewSwitchAsync(profile.ProfileId, pageLifetimeCancellation.Token);
+            isSwitchDialogVisible = true;
+            if (!switchPreview.CanProceed) {
+                switchStatusMessage = switchPreview.Message ?? "目前無法安全切換此帳號。";
+                switchStatusSeverity = Severity.Warning;
+            }
+        });
+
+        if (!isSwitchDialogVisible) {
+            await CancelSwitch();
+        }
+    }
+
+    private async Task ConfirmSwitchAsync() {
+        if (isBusy || switchTargetProfileId is null || switchPreview is not { CanProceed: true } preview
+            || IsRecoveryRequired || IsCleanupPending) {
+            return;
+        }
+
+        switchStatusMessage = null;
+        await RunPageActionAsync(PageAction.Switch, async () => {
+            ClaudeDesktopSwitchService.SwitchResult result = await Switches.SwitchAsync(preview, pageLifetimeCancellation.Token);
+            switchStatusMessage = result.Message ?? SwitchResultMessage(result.Outcome, false);
+            switchStatusSeverity = SwitchResultSeverity(result.Outcome);
+            switchActionBlocked = result.Outcome != ClaudeDesktopSwitchService.SwitchOutcome.Succeeded;
+            operationMessage = switchStatusMessage;
+            operationSeverity = switchStatusSeverity;
+            await ReloadPageStateAsync();
+
+            if (result.Outcome == ClaudeDesktopSwitchService.SwitchOutcome.Succeeded) {
+                isSwitchDialogVisible = false;
+                ClearSwitchPreview();
+            }
+        });
+    }
+
+    private async Task RecoverPendingSwitchAsync() {
+        if (isBusy || (!IsRecoveryRequired && !IsCleanupPending)) {
+            return;
+        }
+
+        switchStatusMessage = null;
+        await RunPageActionAsync(PageAction.Recover, async () => {
+            ClaudeDesktopSwitchService.SwitchResult result = await Switches.RecoverPendingSwitchAsync(pageLifetimeCancellation.Token);
+            switchStatusMessage = result.Message ?? SwitchResultMessage(result.Outcome, true);
+            switchStatusSeverity = SwitchResultSeverity(result.Outcome);
+            operationMessage = switchStatusMessage;
+            operationSeverity = switchStatusSeverity;
+            await ReloadPageStateAsync();
+
+            if (!IsRecoveryRequired && !IsCleanupPending) {
+                isSwitchDialogVisible = false;
+                ClearSwitchPreview();
+            }
+        });
+    }
+
+    private async Task RunPageActionAsync(PageAction action, Func<Task> operation) {
+        if (isBusy || !hasLoadedPage || Volatile.Read(ref disposed) != 0) {
+            return;
+        }
+
+        isBusy = true;
+        activeAction = action;
+        pageError = null;
+        try {
+            await operation();
+        } catch (OperationCanceledException) when (pageLifetimeCancellation.IsCancellationRequested) {
+        } catch (Exception) {
+            operationMessage = action switch {
+                PageAction.Capture => "無法保存目前 Claude Desktop 帳號，請確認本機身分後重試。",
+                PageAction.RefreshQuota => "無法查詢此 Claude 帳號的額度，請稍後再試。",
+                PageAction.PreviewSwitch => "無法預覽帳號切換，請重新載入後再試。",
+                PageAction.Switch => "切換作業未完成。請檢查交易狀態，必要時使用復原入口。",
+                PageAction.Recover => "無法完成切換復原，交易資料仍保留供下次重試。",
+                PageAction.Catalog => "無法保存 Claude 帳號清單的變更，請重新載入後再試。",
+                _ => "Claude 操作失敗，請重新載入後再試。"
+            };
+            operationSeverity = Severity.Error;
+            if (action is PageAction.Switch or PageAction.Recover) {
+                switchActionBlocked = action == PageAction.Switch;
+                switchStatusMessage = operationMessage;
+                switchStatusSeverity = Severity.Error;
+                try {
+                    await ReloadPageStateAsync();
+                } catch (Exception) {
+                }
+            }
+        } finally {
+            activeAction = PageAction.None;
+            isBusy = false;
+        }
+    }
+
+    private async Task ReloadPageStateAsync() {
+        pageState = await Accounts.GetPageStateAsync(pageLifetimeCancellation.Token);
+        await ReloadQuotaViewsAsync(pageState.Profiles);
+    }
+
+    private async Task ReloadQuotaViewsAsync(IReadOnlyList<ClaudeAccountProfile> profiles) {
+        HashSet<Guid> currentProfileIds = profiles.Select(profile => profile.ProfileId).ToHashSet();
+        foreach (Guid staleProfileId in quotaViews.Keys.Where(profileId => !currentProfileIds.Contains(profileId)).ToArray()) {
+            quotaViews.Remove(staleProfileId);
+        }
+
+        foreach (ClaudeAccountProfile profile in profiles) {
+            try {
+                ClaudeQuotaSnapshot.View loaded = await Quotas.GetViewAsync(profile.ProfileId, pageLifetimeCancellation.Token);
+                quotaViews[profile.ProfileId] = Quotas.GetCurrentView(profile.ProfileId) ?? loaded;
+            } catch (OperationCanceledException) when (pageLifetimeCancellation.IsCancellationRequested) {
+                return;
+            } catch (Exception) {
+                quotaViews[profile.ProfileId] = new(
+                    profile.ProfileId,
+                    null,
+                    ClaudeQuotaSnapshot.RefreshStatus.Error,
+                    null,
+                    "無法載入此帳號的額度快照。"
+                );
+            }
+        }
+    }
+
+    private async Task ReloadCurrentIdentityAsync() {
+        if (isBusy) {
+            return;
+        }
+
+        ClearOperationMessage();
+        await RunPageActionAsync(PageAction.Reload, ReloadPageStateAsync);
+    }
+
+    private Task SetSwitchDialogVisibleAsync(bool visible) {
+        if (!visible && isBusy) {
+            return Task.CompletedTask;
+        }
+
+        isSwitchDialogVisible = visible;
+        if (!visible) {
+            ClearSwitchPreview();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task CancelSwitch() {
+        if (!isBusy) {
+            isSwitchDialogVisible = false;
+            ClearSwitchPreview();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void ClearSwitchPreview() {
+        switchTargetProfileId = null;
+        switchPreview = null;
+        switchActionBlocked = false;
+        switchStatusMessage = null;
+        switchStatusSeverity = Severity.Info;
+    }
+
+    private ClaudeAccountProfile? FindSwitchTarget() {
+        return switchTargetProfileId is Guid targetProfileId
+            ? pageState?.Profiles.FirstOrDefault(profile => profile.ProfileId == targetProfileId)
+            : null;
+    }
+
+    private ClaudeQuotaSnapshot.View? GetQuotaView(Guid profileId) {
+        return quotaViews.TryGetValue(profileId, out ClaudeQuotaSnapshot.View? quota)
+            ? quota
+            : null;
+    }
+
+    private static IReadOnlyList<ClaudeQuotaSnapshot.Window> GetQuotaWindows(ClaudeQuotaSnapshot.View? quota) {
+        return quota?.Snapshot?.Windows ?? Array.Empty<ClaudeQuotaSnapshot.Window>();
+    }
+
+    private static string GetProfileDisplayName(ClaudeAccountProfile profile) {
+        if (!string.IsNullOrWhiteSpace(profile.Alias)) {
+            return profile.Alias.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(profile.MaskedEmail)) {
+            return profile.MaskedEmail;
+        }
+
+        return $"Claude 帳號 {FormatIdentifier(profile.AccountUuid) ?? profile.ProfileId.ToString("N")[..8]}";
+    }
+
+    private static string GetProfileEvidenceText(ClaudeAccountProfile profile) {
+        return $"最近驗證：{FormatDateTime(profile.LastVerifiedAtUtc)}";
+    }
+
+    private static Color IdentityStatusColor(ClaudeAccountService.IdentityStatus status) {
+        return status switch {
+            ClaudeAccountService.IdentityStatus.Verified => Color.Success,
+            ClaudeAccountService.IdentityStatus.ReauthenticationRequired or ClaudeAccountService.IdentityStatus.Mismatch or ClaudeAccountService.IdentityStatus.RecoveryRequired => Color.Error,
+            ClaudeAccountService.IdentityStatus.UnsupportedInstallation or ClaudeAccountService.IdentityStatus.AmbiguousInstallation => Color.Warning,
+            _ => Color.Default
+        };
+    }
+
+    private static string IdentityStatusText(ClaudeAccountService.IdentityStatus status) {
+        return status switch {
+            ClaudeAccountService.IdentityStatus.Verified => "已驗證",
+            ClaudeAccountService.IdentityStatus.ReauthenticationRequired => "需要重新驗證",
+            ClaudeAccountService.IdentityStatus.Mismatch => "身分不一致",
+            ClaudeAccountService.IdentityStatus.UnsupportedInstallation => "不支援此安裝",
+            ClaudeAccountService.IdentityStatus.AmbiguousInstallation => "安裝位置不唯一",
+            ClaudeAccountService.IdentityStatus.RecoveryRequired => "需要復原",
+            _ => "未知"
+        };
+    }
+
+    private static string IdentityStatusMessage(ClaudeAccountService.IdentityStatus status) {
+        return status switch {
+            ClaudeAccountService.IdentityStatus.Verified => "目前身分已由 Claude Desktop 設定與 profile API 相互確認。",
+            ClaudeAccountService.IdentityStatus.ReauthenticationRequired => "目前 Desktop 認證需要重新驗證。請先在 Claude Desktop 完成登入，再重新讀取身分。",
+            ClaudeAccountService.IdentityStatus.Mismatch => "本機帳號識別資料與 profile API 回應不一致，因此無法安全切換。",
+            ClaudeAccountService.IdentityStatus.UnsupportedInstallation => "找不到受支援的 Claude Desktop 安裝。",
+            ClaudeAccountService.IdentityStatus.AmbiguousInstallation => "找到多個 Claude Desktop 安裝位置，請先處理安裝歧義。",
+            ClaudeAccountService.IdentityStatus.RecoveryRequired => "有未完成的切換交易，需要先完成復原。",
+            _ => "尚未取得可驗證的 Claude Desktop 身分。"
+        };
+    }
+
+    private static string ProfileStatusText(ClaudeAccountProfile.VerificationStatus status) {
+        return status switch {
+            ClaudeAccountProfile.VerificationStatus.Verified => "已驗證",
+            ClaudeAccountProfile.VerificationStatus.ReauthenticationRequired => "需要重新驗證",
+            _ => "未知"
+        };
+    }
+
+    private static Color ProfileStatusColor(ClaudeAccountProfile.VerificationStatus status) {
+        return status switch {
+            ClaudeAccountProfile.VerificationStatus.Verified => Color.Success,
+            ClaudeAccountProfile.VerificationStatus.ReauthenticationRequired => Color.Error,
+            _ => Color.Warning
+        };
+    }
+
+    private static string ProcessStatusText(IClaudeDesktopProcessController.ProcessStatus status) {
+        return status switch {
+            IClaudeDesktopProcessController.ProcessStatus.Running => "執行中",
+            IClaudeDesktopProcessController.ProcessStatus.NotRunning => "未執行",
+            _ => "未知"
+        };
+    }
+
+    private static string QuotaStatusText(ClaudeQuotaSnapshot.RefreshStatus? status) {
+        return status switch {
+            ClaudeQuotaSnapshot.RefreshStatus.Refreshing => "查詢中",
+            ClaudeQuotaSnapshot.RefreshStatus.Fresh => "最新",
+            ClaudeQuotaSnapshot.RefreshStatus.Stale => "快照過期",
+            ClaudeQuotaSnapshot.RefreshStatus.ReauthenticationRequired => "需要重新驗證",
+            ClaudeQuotaSnapshot.RefreshStatus.Error => "查詢失敗",
+            ClaudeQuotaSnapshot.RefreshStatus.Incomplete => "資料不完整",
+            ClaudeQuotaSnapshot.RefreshStatus.Unknown => "未知",
+            _ => "尚未查詢"
+        };
+    }
+
+    private static Color QuotaStatusColor(ClaudeQuotaSnapshot.RefreshStatus? status) {
+        return status switch {
+            ClaudeQuotaSnapshot.RefreshStatus.Fresh => Color.Success,
+            ClaudeQuotaSnapshot.RefreshStatus.Stale or ClaudeQuotaSnapshot.RefreshStatus.Incomplete => Color.Warning,
+            ClaudeQuotaSnapshot.RefreshStatus.ReauthenticationRequired or ClaudeQuotaSnapshot.RefreshStatus.Error => Color.Error,
+            ClaudeQuotaSnapshot.RefreshStatus.Refreshing => Color.Info,
+            _ => Color.Default
+        };
+    }
+
+    private static Severity QuotaMessageSeverity(ClaudeQuotaSnapshot.RefreshStatus? status) {
+        return status switch {
+            ClaudeQuotaSnapshot.RefreshStatus.Stale or ClaudeQuotaSnapshot.RefreshStatus.Incomplete => Severity.Warning,
+            ClaudeQuotaSnapshot.RefreshStatus.ReauthenticationRequired or ClaudeQuotaSnapshot.RefreshStatus.Error => Severity.Error,
+            ClaudeQuotaSnapshot.RefreshStatus.Fresh => Severity.Success,
+            _ => Severity.Info
+        };
+    }
+
+    private static string? GetQuotaCheckedAtText(ClaudeQuotaSnapshot.View? quota) {
+        if (quota?.Snapshot is ClaudeQuotaSnapshot snapshot) {
+            return quota.Status == ClaudeQuotaSnapshot.RefreshStatus.Fresh
+                ? $"額度快照時間：{FormatDateTime(snapshot.RetrievedAtUtc)}"
+                : $"最近成功快照：{FormatDateTime(snapshot.RetrievedAtUtc)}";
+        }
+
+        return quota?.LastAttemptAtUtc is DateTimeOffset lastAttemptAtUtc
+            ? $"最近查詢嘗試：{FormatDateTime(lastAttemptAtUtc)}"
+            : null;
+    }
+
+    private static string? GetQuotaMessage(ClaudeQuotaSnapshot.View? quota) {
+        if (quota is null) {
+            return null;
+        }
+
+        string? message = quota.Message;
+        if (quota.RetryAfterUtc is not DateTimeOffset retryAfterUtc) {
+            return message;
+        }
+
+        string retryMessage = $"最早可於 {FormatDateTime(retryAfterUtc)} 再次查詢。";
+        return string.IsNullOrWhiteSpace(message)
+            ? retryMessage
+            : $"{message} {retryMessage}";
+    }
+
+    private static string FormatDateTime(DateTimeOffset? value) {
+        return value is DateTimeOffset timestamp
+            ? timestamp.ToLocalTime().ToString("yyyy/MM/dd HH:mm", CultureInfo.CurrentCulture)
+            : "未知";
+    }
+
+    private static string? FormatIdentifier(string? value) {
+        if (string.IsNullOrWhiteSpace(value)) {
+            return null;
+        }
+
+        string normalized = value.Trim();
+        return normalized.Length > 20
+            ? $"{normalized[..8]}…{normalized[^6..]}"
+            : normalized;
+    }
+
+    private bool CanRefreshQuota(ClaudeAccountProfile profile) {
+        return hasLoadedPage && pageState?.Profiles.Any(candidate => candidate.ProfileId == profile.ProfileId) == true;
+    }
+
+    private bool CanRequestSwitch(ClaudeAccountProfile profile) {
+        ClaudeAccountService.CurrentIdentity? identity = pageState?.CurrentIdentity;
+        return hasLoadedPage && !IsRecoveryRequired
+            && !IsCleanupPending
+            && profile.Status == ClaudeAccountProfile.VerificationStatus.Verified
+            && identity is { Status: ClaudeAccountService.IdentityStatus.Verified, MatchedProfile: not null }
+            && identity.MatchedProfile.ProfileId is Guid currentProfileId
+            && currentProfileId != profile.ProfileId;
+    }
+
+    private string? SwitchDisabledReason(ClaudeAccountProfile profile) {
+        if (IsRecoveryRequired) {
+            return "先完成待復原交易，才能開始新切換。";
+        }
+
+        if (IsCleanupPending) {
+            return "切換已完成，請先重試清理交易暫存，再開始新切換。";
+        }
+
+        if (profile.Status != ClaudeAccountProfile.VerificationStatus.Verified) {
+            return profile.Status == ClaudeAccountProfile.VerificationStatus.ReauthenticationRequired
+                ? "此帳號需要重新驗證，請在 Claude Desktop 登入後重新保存。"
+                : "此帳號尚未通過驗證，無法作為切換目標。";
+        }
+
+        ClaudeAccountService.CurrentIdentity? identity = pageState?.CurrentIdentity;
+        if (identity is { Status: ClaudeAccountService.IdentityStatus.Verified, MatchedProfile: null }) {
+            return "目前 Claude Desktop 帳號已驗證，但無法與已保存帳號安全配對，因此不能切換。";
+        }
+
+        if (identity is not { Status: ClaudeAccountService.IdentityStatus.Verified, MatchedProfile: not null }) {
+            return "目前 Claude Desktop 身分尚未驗證，無法安全切換。";
+        }
+
+        if (identity.MatchedProfile.ProfileId == profile.ProfileId) {
+            return "此帳號就是目前 Claude Desktop 使用中的帳號。";
+        }
+
+        return null;
+    }
+
+    private bool CanCaptureCurrentProfile => hasLoadedPage && !isBusy
+        && !IsRecoveryRequired
+        && pageState?.ProcessStatus == IClaudeDesktopProcessController.ProcessStatus.NotRunning
+        && pageState?.CurrentIdentity.Status is ClaudeAccountService.IdentityStatus.Unknown or ClaudeAccountService.IdentityStatus.Verified;
+
+    private string? CaptureDisabledReason {
+        get {
+            if (isBusy) {
+                return "請等目前作業完成後再保存帳號。";
+            }
+
+            if (IsRecoveryRequired) {
+                return "先完成待復原交易，才能保存或更新 profile。";
+            }
+
+            if (pageState?.ProcessStatus == IClaudeDesktopProcessController.ProcessStatus.Running) {
+                return "請先正常結束 Claude Desktop，再保存目前帳號。";
+            }
+
+            if (pageState?.ProcessStatus != IClaudeDesktopProcessController.ProcessStatus.NotRunning) {
+                return "目前無法確認 Claude Desktop 已停止，暫時不能保存帳號。";
+            }
+
+            return pageState?.CurrentIdentity.Status switch {
+                ClaudeAccountService.IdentityStatus.ReauthenticationRequired => "請先在 Claude Desktop 重新登入，再重新讀取身分。",
+                ClaudeAccountService.IdentityStatus.Mismatch => "身分資料不一致，為避免保存錯誤帳號，已停用此操作。",
+                ClaudeAccountService.IdentityStatus.UnsupportedInstallation => "目前 Claude Desktop 安裝不受支援，無法保存 profile。",
+                ClaudeAccountService.IdentityStatus.AmbiguousInstallation => "目前找到多個安裝位置，無法安全保存 profile。",
+                _ => null
+            };
+        }
+    }
+
+    private static string SwitchResultMessage(ClaudeDesktopSwitchService.SwitchOutcome outcome, bool isRecovery) {
+        return (outcome, isRecovery) switch {
+            (ClaudeDesktopSwitchService.SwitchOutcome.Succeeded, false) => "Claude Desktop 已切換至目標帳號。",
+            (ClaudeDesktopSwitchService.SwitchOutcome.Succeeded, true) => "切換復原已完成。",
+            (ClaudeDesktopSwitchService.SwitchOutcome.FailedRolledBack, _) => "切換失敗，原帳號設定已復原。",
+            (ClaudeDesktopSwitchService.SwitchOutcome.RecoveryRequired, _) => "切換尚未完成，交易資料已保留。請重試復原。",
+            (ClaudeDesktopSwitchService.SwitchOutcome.CleanupPending, _) => "帳號切換已完成，交易暫存清理待重試。",
+            (ClaudeDesktopSwitchService.SwitchOutcome.Blocked, _) => "目前狀態不允許執行此作業。",
+            _ => "切換未執行，請重新載入狀態後再試。"
+        };
+    }
+
+    private static Severity SwitchResultSeverity(ClaudeDesktopSwitchService.SwitchOutcome outcome) {
+        return outcome switch {
+            ClaudeDesktopSwitchService.SwitchOutcome.Succeeded => Severity.Success,
+            ClaudeDesktopSwitchService.SwitchOutcome.FailedRolledBack => Severity.Error,
+            ClaudeDesktopSwitchService.SwitchOutcome.RecoveryRequired => Severity.Error,
+            ClaudeDesktopSwitchService.SwitchOutcome.CleanupPending => Severity.Warning,
+            ClaudeDesktopSwitchService.SwitchOutcome.Blocked or ClaudeDesktopSwitchService.SwitchOutcome.Rejected => Severity.Warning,
+            _ => Severity.Error
+        };
+    }
+
+    private void ClearOperationMessage() {
+        pageError = null;
+        operationMessage = null;
+        operationSeverity = Severity.Info;
+    }
+
+    private bool CanEditCatalog => hasLoadedPage && !isBusy && !IsRecoveryRequired && !IsCleanupPending;
+
+    private string? CatalogDisabledReason => IsRecoveryRequired || IsCleanupPending
+        ? "有尚未完成的切換交易，完成復原或清理前無法變更帳號清單。"
+        : null;
+
+    private async Task UpdateAliasAsync(ClaudeAccountProfile profile, string? alias) {
+        await RunCatalogActionAsync(() => Accounts.UpdateAliasAsync(
+            profile.ProfileId,
+            alias,
+            pageLifetimeCancellation.Token
+        ));
+    }
+
+    private async Task MoveProfileAsync(ClaudeAccountProfile profile, ClaudeAccountService.MoveDirection direction) {
+        await RunCatalogActionAsync(() => Accounts.MoveAsync(
+            profile.ProfileId,
+            direction,
+            pageLifetimeCancellation.Token
+        ));
+    }
+
+    private void BeginRemove(ClaudeAccountProfile profile) {
+        if (CanEditCatalog) {
+            removingProfile = profile;
+        }
+    }
+
+    private Task SetRemoveDialogVisible(bool visible) {
+        if (!visible && !(isBusy && activeAction == PageAction.Catalog)) {
+            removingProfile = null;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task CancelRemove() {
+        if (!isBusy) {
+            removingProfile = null;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task RemoveProfileAsync(Guid profileId) {
+        if (removingProfile?.ProfileId != profileId) {
+            return;
+        }
+
+        await RunCatalogActionAsync(() => Accounts.RemoveAsync(profileId, pageLifetimeCancellation.Token));
+        removingProfile = null;
+    }
+
+    private async Task RunCatalogActionAsync(Func<Task<ClaudeAccountService.MetadataResult>> operation) {
+        if (!CanEditCatalog) {
+            return;
+        }
+
+        await RunPageActionAsync(PageAction.Catalog, async () => {
+            ClaudeAccountService.MetadataResult result = await operation();
+            if (result.Message is not null) {
+                operationMessage = result.Message;
+                operationSeverity = result.Saved ? Severity.Success : Severity.Error;
+            }
+
+            pageState = Accounts.CurrentPageState;
+            await ReloadQuotaViewsAsync(pageState.Profiles);
+        });
+    }
+
+    private void OnQuotaStateChanged(object? sender, EventArgs e) {
+        if (Volatile.Read(ref disposed) != 0 || pageState is null) {
+            return;
+        }
+
+        _ = InvokeAsync(() => {
+            if (Volatile.Read(ref disposed) != 0 || pageState is null) {
+                return;
+            }
+
+            bool changed = false;
+            foreach (ClaudeAccountProfile profile in pageState.Profiles) {
+                if (Quotas.GetCurrentView(profile.ProfileId) is ClaudeQuotaSnapshot.View view
+                    && (!quotaViews.TryGetValue(profile.ProfileId, out ClaudeQuotaSnapshot.View? existing) || existing != view)) {
+                    quotaViews[profile.ProfileId] = view;
+                    changed = true;
+                }
+            }
+
+            if (changed) {
+                StateHasChanged();
+            }
+        });
+    }
+
+    private enum PageAction {
+        None,
+        Reload,
+        Capture,
+        RefreshQuota,
+        PreviewSwitch,
+        Switch,
+        Recover,
+        Catalog
+    }
+}

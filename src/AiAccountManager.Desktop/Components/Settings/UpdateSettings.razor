@@ -1,0 +1,178 @@
+@implements IDisposable
+@inject SettingsService SettingsState
+@inject UpdateService Updates
+
+<MudPaper Elevation="0" Outlined="true" Class="content-card">
+    <MudText Typo="Typo.h6">更新來源</MudText>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+        設定自己的 HTTPS Velopack feed。留空時使用預設來源。
+    </MudText>
+    <MudTextField T="string"
+                  Label="更新 feed URL（選填）"
+                  Value="@feedUrl"
+                  ValueChanged="OnFeedChanged"
+                  Disabled="@isBusy"
+                  Clearable="true" />
+    <MudButton Color="Color.Primary"
+               Variant="Variant.Filled"
+               Disabled="@(isBusy || SettingsState.Settings is null)"
+               OnClick="SaveFeedAsync">保存更新來源</MudButton>
+    @if (!string.IsNullOrWhiteSpace(SettingsState.SettingsError)) {
+        <MudText Color="Color.Error">@SettingsState.SettingsError</MudText>
+    }
+
+    @if (SettingsState.Settings is not null) {
+        <MudText Typo="Typo.body2">目前來源（@(string.IsNullOrWhiteSpace(SettingsState.Settings.UpdateFeedUrl) ? "預設" : "自訂")）：@EffectiveFeed</MudText>
+    }
+
+    <MudText Typo="Typo.body2">@StatusMessage</MudText>
+    @if (Updates.State.Status == UpdateStatus.Downloading) {
+        <MudProgressLinear Value="@Updates.State.ProgressPercent" Color="Color.Primary" />
+        <MudText Typo="Typo.caption">@Updates.State.ProgressPercent% 已下載</MudText>
+    }
+    @if (SettingsState.Settings is not null
+        && UpdateStateMatchesFeed
+        && !string.IsNullOrWhiteSpace(Updates.State.Version)) {
+        <MudText Typo="Typo.caption">可用版本：@Updates.State.Version</MudText>
+    }
+
+    <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
+        <MudButton Variant="Variant.Text" Disabled="@(!CanCheck)" OnClick="CheckAsync">檢查更新</MudButton>
+        @if (Updates.State.Status == UpdateStatus.Downloading) {
+            <MudButton Color="Color.Error" Variant="Variant.Text" OnClick="CancelDownload">取消下載</MudButton>
+        } else {
+            <MudButton Variant="Variant.Text" Disabled="@(!CanDownload)" OnClick="DownloadAsync">下載更新</MudButton>
+        }
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!CanApply)" OnClick="ApplyAsync">套用並重新啟動</MudButton>
+    </MudStack>
+</MudPaper>
+
+@code {
+    private string? feedUrl;
+    private bool isBusy;
+    private bool isEditing;
+    private CancellationTokenSource? downloadCancellation;
+
+    private bool IsConfigured => SettingsState.Settings is not null && !isEditing;
+    private string EffectiveFeed => UpdateFeedResolver.Resolve(SettingsState.Settings?.UpdateFeedUrl).AbsoluteUri;
+    private bool CanCheck => !isBusy && IsConfigured && Updates.State.Status != UpdateStatus.Checking;
+    private bool CanDownload => !isBusy && IsConfigured && UpdateStateMatchesFeed && Updates.State.Status == UpdateStatus.Available;
+    private bool CanApply => !isBusy && IsConfigured && UpdateStateMatchesFeed && Updates.State.Status == UpdateStatus.ReadyToApply;
+    private bool UpdateStateMatchesFeed => SameFeedUri(
+        Updates.State.FeedUri,
+        EffectiveFeed
+    );
+
+    private string StatusMessage => Updates.State.Message ?? "可檢查更新。";
+
+    protected override void OnInitialized() {
+        SettingsState.StateChanged += OnSettingsChanged;
+        Updates.StateChanged += OnUpdateStateChanged;
+        CopySavedFeed();
+    }
+
+    public void Dispose() {
+        SettingsState.StateChanged -= OnSettingsChanged;
+        Updates.StateChanged -= OnUpdateStateChanged;
+        downloadCancellation?.Cancel();
+        downloadCancellation?.Dispose();
+    }
+
+    private Task OnFeedChanged(string? value) {
+        feedUrl = value;
+        isEditing = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveFeedAsync() {
+        if (isBusy || SettingsState.Settings is null) {
+            return;
+        }
+
+        isBusy = true;
+        string? value = string.IsNullOrWhiteSpace(feedUrl) ? null : feedUrl.Trim();
+        try {
+            bool saved = await SettingsState.SaveAsync(
+                SettingsState.Settings with { UpdateFeedUrl = value },
+                CancellationToken.None
+            );
+            if (!saved) {
+                return;
+            }
+
+            isEditing = false;
+            feedUrl = value;
+        } finally {
+            isBusy = false;
+        }
+    }
+
+    private async Task CheckAsync() {
+        await RunUpdateActionAsync(() => Updates.CheckAsync(CancellationToken.None));
+    }
+
+    private async Task DownloadAsync() {
+        if (isBusy) {
+            return;
+        }
+
+        isBusy = true;
+        downloadCancellation = new CancellationTokenSource();
+        try {
+            _ = await Updates.DownloadAsync(downloadCancellation.Token);
+        } catch (Exception) {
+            await InvokeAsync(StateHasChanged);
+        } finally {
+            downloadCancellation?.Dispose();
+            downloadCancellation = null;
+            isBusy = false;
+        }
+    }
+
+    private void CancelDownload() {
+        downloadCancellation?.Cancel();
+    }
+
+    private async Task ApplyAsync() {
+        await RunUpdateActionAsync(() => Updates.ApplyAsync(CancellationToken.None));
+    }
+
+    private async Task RunUpdateActionAsync(Func<Task<UpdateServiceState>> operation) {
+        if (isBusy) {
+            return;
+        }
+
+        isBusy = true;
+        try {
+            _ = await operation();
+        } catch (Exception) {
+            await InvokeAsync(StateHasChanged);
+        } finally {
+            isBusy = false;
+        }
+    }
+
+    private void OnSettingsChanged(object? sender, EventArgs e) {
+        _ = InvokeAsync(() => {
+            if (!isEditing) {
+                CopySavedFeed();
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    private void OnUpdateStateChanged(object? sender, EventArgs e) {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void CopySavedFeed() {
+        feedUrl = SettingsState.Settings?.UpdateFeedUrl;
+    }
+
+    private static bool SameFeedUri(string? stateFeed, string? configuredFeed) {
+        return Uri.TryCreate(stateFeed, UriKind.Absolute, out Uri? stateUri)
+            && Uri.TryCreate(configuredFeed, UriKind.Absolute, out Uri? configuredUri)
+            && string.Equals(stateUri.AbsoluteUri, configuredUri.AbsoluteUri, StringComparison.Ordinal);
+    }
+}
