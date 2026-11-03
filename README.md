@@ -26,13 +26,13 @@ Windows x64 桌面應用程式，以 WPF 承載 Blazor Hybrid 與 MudBlazor。�
 
 ## 技術與需求
 
-- Windows x64、.NET SDK 10.0.402；global.json 固定 SDK 版本。
+- Windows x64、.NET SDK 10.0.403；global.json 固定 SDK 版本。
 - WPF + Microsoft.NET.Sdk.Razor Blazor Hybrid、WebView2 Evergreen Runtime、MudBlazor。
 - Codex app-server rust-v0.162.1，封裝與執行前都核對官方 release binary hash。
 - Velopack 1.2.161；NuGet 套件版本集中於 Directory.Packages.props。
 - NUnit 5 測試專案。
 
-首次啟動需安裝 Microsoft Edge WebView2 Evergreen Runtime。產品使用目前 Windows 使用者的 DPAPI 保護本機 identity key；Codex OAuth token 由隔離 profile 的 Codex app-server/keyring 管理，不寫入產品 JSON 檔。
+安裝器會處理 Microsoft Edge WebView2 Evergreen Runtime，程式啟動時仍會檢查 Runtime。產品使用目前 Windows 使用者的 DPAPI 保護本機 identity key；Codex OAuth token 由隔離 profile 的 Codex app-server/keyring 管理，不寫入產品 JSON 檔。
 
 ## 開發
 
@@ -71,7 +71,7 @@ pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.1.0 -AppServerZip
 
 需要改用其他位置的 vpk.exe 時，以 `-VpkToolPath` 指定。
 
-輸出包含 artifacts\Setup\Setup.exe、Velopack .nupkg 與 releases.win.json；已核對的 package、第三方 notices 與 SHA-256 manifest 另複製至 artifacts\releases\<version> 和 outputs\first-release。封裝腳本不執行安裝器，也不發布更新 feed。
+輸出包含 `artifacts\releases\ai-account-manager-win-Setup.exe`、Velopack .nupkg、releases.win.json、第三方 notices 與 SHA-256 manifest。驗證通過後會替換 `artifacts\releases` 與 `outputs\first-release`，不使用版本子目錄。封裝腳本不執行安裝器，也不發布更新 feed。
 
 ## 授權
 

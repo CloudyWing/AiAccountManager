@@ -279,6 +279,9 @@ Copy-Item -LiteralPath $noticeSource -Destination (Join-Path $publishDirectory '
 $packArguments = @(
     'pack',
     '--packId', 'ai-account-manager',
+    '--packTitle', 'AI 帳號管理工具',
+    '--packAuthors', '雲翼',
+    '--framework', 'webview2',
     '--packVersion', $Version,
     '--runtime', 'win-x64',
     '--packDir', $publishDirectory,
@@ -352,11 +355,23 @@ foreach ($package in $packages) {
 
         $packageIdNode = $nuspecDocument.SelectSingleNode("/*[local-name()='package']/*[local-name()='metadata']/*[local-name()='id']")
         $packageVersionNode = $nuspecDocument.SelectSingleNode("/*[local-name()='package']/*[local-name()='metadata']/*[local-name()='version']")
+        $packageTitleNode = $nuspecDocument.SelectSingleNode("/*[local-name()='package']/*[local-name()='metadata']/*[local-name()='title']")
+        $packageAuthorsNode = $nuspecDocument.SelectSingleNode("/*[local-name()='package']/*[local-name()='metadata']/*[local-name()='authors']")
+        $packageRuntimeDependenciesNode = $nuspecDocument.SelectSingleNode("/*[local-name()='package']/*[local-name()='metadata']/*[local-name()='runtimeDependencies']")
         if ($null -eq $packageIdNode -or $packageIdNode.InnerText -cne 'ai-account-manager') {
             throw "Package '$($package.Name)' does not identify product ai-account-manager."
         }
         if ($null -eq $packageVersionNode -or $packageVersionNode.InnerText -cne $Version) {
             throw "Package '$($package.Name)' does not identify version $Version."
+        }
+        if ($null -eq $packageTitleNode -or $packageTitleNode.InnerText -cne 'AI 帳號管理工具') {
+            throw "Package '$($package.Name)' does not contain the expected title."
+        }
+        if ($null -eq $packageAuthorsNode -or $packageAuthorsNode.InnerText -cne '雲翼') {
+            throw "Package '$($package.Name)' does not contain the expected authors."
+        }
+        if ($null -eq $packageRuntimeDependenciesNode -or $packageRuntimeDependenciesNode.InnerText -cne 'webview2') {
+            throw "Package '$($package.Name)' does not declare the expected webview2 runtime dependency."
         }
     } finally {
         $packageArchive.Dispose()
