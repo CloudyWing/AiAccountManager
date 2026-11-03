@@ -6,7 +6,7 @@
                        Color="Color.Inherit"
                        aria-label="開啟或關閉導覽"
                        OnClick="ToggleDrawer" />
-        <MudText Typo="Typo.h6" Class="app-title">AI 帳號管理工具</MudText>
+        <MudText Typo="Typo.h6" Class="app-title">@AppIdentity.DisplayName</MudText>
     </MudAppBar>
     <MudDrawer @bind-Open="drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="1" Variant="DrawerVariant.Responsive">
         <NavMenu />

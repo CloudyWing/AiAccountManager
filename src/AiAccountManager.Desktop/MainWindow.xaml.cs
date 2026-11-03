@@ -142,7 +142,7 @@ public partial class MainWindow : Window {
                 Hide();
             } catch (Exception) {
                 Show();
-                MessageBox.Show(this, "無法顯示系統匣圖示，視窗仍保持開啟。", "AI 帳號管理工具", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(this, "無法顯示系統匣圖示，視窗仍保持開啟。", AppIdentity.DisplayName, MessageBoxButton.OK, MessageBoxImage.Error);
             }
             return;
         }
@@ -193,7 +193,7 @@ public partial class MainWindow : Window {
         SafeShutdownSequence.HandleFailure(exception, Show, () => MessageBox.Show(
             this,
             "背景工作尚未安全完成。資料仍保留，請稍後再試一次關閉。",
-            "AI 帳號管理工具",
+            AppIdentity.DisplayName,
             MessageBoxButton.OK,
             MessageBoxImage.Warning
         ), ShowShutdownFailure);
@@ -221,7 +221,7 @@ public partial class MainWindow : Window {
         MessageBox.Show(
             this,
             "無法安全完成背景工作關閉。資料仍保留，請稍後再試一次。",
-            "AI 帳號管理工具",
+            AppIdentity.DisplayName,
             MessageBoxButton.OK,
             MessageBoxImage.Error
         );

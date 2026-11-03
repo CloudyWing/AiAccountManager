@@ -6,6 +6,7 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>CloudyWing.$(MSBuildProjectName)</AssemblyName>
+    <AssemblyTitle>AI 帳號管理工具</AssemblyTitle>
     <RootNamespace>CloudyWing.AiAccountManager.Desktop</RootNamespace>
     <StartupObject>CloudyWing.AiAccountManager.Desktop.Program</StartupObject>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

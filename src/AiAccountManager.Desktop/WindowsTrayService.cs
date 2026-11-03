@@ -31,7 +31,7 @@ public sealed class WindowsTrayService : ITrayService {
         Forms.ContextMenuStrip menu = new();
         menu.Items.Add("開啟", null, (_, _) => OpenRequested?.Invoke(this, EventArgs.Empty));
         menu.Items.Add("結束", null, (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty));
-        Forms.NotifyIcon result = new() { Icon = applicationIcon, Text = "AI 帳號管理工具", ContextMenuStrip = menu };
+        Forms.NotifyIcon result = new() { Icon = applicationIcon, Text = AppIdentity.DisplayName, ContextMenuStrip = menu };
         result.DoubleClick += (_, _) => OpenRequested?.Invoke(this, EventArgs.Empty);
         result.BalloonTipClicked += (_, _) => BalloonClicked?.Invoke(this, EventArgs.Empty);
         return result;
