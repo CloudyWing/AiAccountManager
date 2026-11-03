@@ -50,6 +50,26 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version $env:APP_VERSION -AppServerZipPath $env:CODEX_APP_SERVER_ZIP -NugetPackagesPath $env:NUGET_PACKAGES
 
+      - name: Generate WinGet manifest
+        shell: pwsh
+        run: pwsh -NoProfile -File .\scripts\New-WinGetManifest.ps1 -Version $env:APP_VERSION
+
+      - name: Validate WinGet manifest
+        shell: pwsh
+        run: |
+          if (Get-Command winget -ErrorAction SilentlyContinue) {
+            winget validate --manifest "artifacts\winget\$env:APP_VERSION"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            Write-Warning 'winget is unavailable; manifest validation was skipped.'
+          }
+
+      - name: Upload WinGet manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: winget-manifest
+          path: artifacts/winget/*
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
