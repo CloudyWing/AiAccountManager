@@ -14,6 +14,10 @@ public sealed class QuotaNotificationCoordinator : BackgroundService {
     private static readonly Action<ILogger, Exception?> LogEvaluationFailure = LoggerMessage.Define(
         LogLevel.Warning, new EventId(1, nameof(LogEvaluationFailure)), "無法評估額度通知，將在下次狀態更新時重試。"
     );
+    private static readonly Action<ILogger, string, string, string, bool, bool, NotificationDecisionOutcome, Exception?> LogDecision =
+        LoggerMessage.Define<string, string, string, bool, bool, NotificationDecisionOutcome>(LogLevel.Information,
+            new EventId(2, nameof(LogDecision)),
+            "額度通知決策：Provider={Provider} Window={Window} Cycle={Cycle} DedupHit={DedupHit} Sent={Sent} Outcome={Outcome}");
     private readonly Channel<bool> queue = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) {
         FullMode = BoundedChannelFullMode.DropWrite,
         SingleReader = true
@@ -60,8 +64,19 @@ public sealed class QuotaNotificationCoordinator : BackgroundService {
                         continue;
                     }
                     reading.Value = true;
-                    await EvaluateProviderAsync(reader.ReadCodexNotificationAsync, stoppingToken).ConfigureAwait(false);
-                    await EvaluateProviderAsync(reader.ReadClaudeNotificationAsync, stoppingToken).ConfigureAwait(false);
+                    NotificationSnapshot? codexSnapshot = await ReadSnapshotAsync(reader.ReadCodexNotificationAsync, stoppingToken).ConfigureAwait(false);
+                    NotificationSnapshot? claudeSnapshot = await ReadSnapshotAsync(reader.ReadClaudeNotificationAsync, stoppingToken).ConfigureAwait(false);
+                    List<NotificationSnapshot> snapshots = [];
+                    if (codexSnapshot is not null) { snapshots.Add(codexSnapshot); }
+                    if (claudeSnapshot is not null) { snapshots.Add(claudeSnapshot); }
+                    current = settings.Settings;
+                    IReadOnlyList<NotificationDecision> decisions = await evaluator.EvaluateAsync(
+                        snapshots, current?.LowQuotaNotificationsEnabled == true, current?.LowQuotaThresholdPercent ?? 0, stoppingToken
+                    ).ConfigureAwait(false);
+                    foreach (NotificationDecision decision in decisions) {
+                        LogDecision(logger, decision.Provider, decision.WindowKey, decision.Cycle, decision.DedupHit,
+                            decision.Sent, decision.Outcome, null);
+                    }
                 } catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) {
                     break;
                 } catch (Exception exception) {
@@ -78,17 +93,14 @@ public sealed class QuotaNotificationCoordinator : BackgroundService {
         }
     }
 
-    private async Task EvaluateProviderAsync(Func<CancellationToken, Task<NotificationSnapshot?>> read, CancellationToken token) {
+    private async Task<NotificationSnapshot?> ReadSnapshotAsync(Func<CancellationToken, Task<NotificationSnapshot?>> read, CancellationToken token) {
         try {
-            NotificationSnapshot? snapshot = await read(token).ConfigureAwait(false);
-            AppSettings? current = settings.Settings;
-            if (snapshot is not null && current?.LowQuotaNotificationsEnabled == true) {
-                await evaluator.EvaluateAsync(snapshot, true, current.LowQuotaThresholdPercent, token).ConfigureAwait(false);
-            }
+            return await read(token).ConfigureAwait(false);
         } catch (OperationCanceledException) when (token.IsCancellationRequested) {
             throw;
         } catch (Exception exception) {
             LogEvaluationFailure(logger, exception);
+            return null;
         }
     }
 
