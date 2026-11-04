@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.2.0 (2026-11-04)
+
+### New Features
+
+- 安裝器改由 Velopack 處理 Microsoft Edge WebView2 Evergreen Runtime，程式啟動時仍保留 Runtime 檢查與失敗原因提示。
+- 重複啟動時喚醒並前景化既有視窗，不建立第二份背景服務；既有程序無回應時顯示提示後結束。
+- 新增 WinGet manifest 與產生器，含中英文 locale、安裝器資訊與一致性測試。manifest 未提交至 microsoft/winget-pkgs，需以本機 manifest 安裝。
+
+### Changes
+
+- 使用者可見的顯示名稱統一由 AppIdentity 常數提供，涵蓋視窗標題、開始選單、已安裝應用程式清單、系統匣與通知來源。Package ID 與安裝路徑不變。
+- 額度偏低通知改以分鐘精度正規化去重，同一個額度視窗每輪只發一則；決策日誌不含帳號識別、別名或 email。
+
+### Bug Fixes
+
+- 修正主視窗內容區可能完全空白且宿主程序持續高 CPU 的問題。額度讀取不再等待 Claude 作業閘門，背景作業停在網路呼叫時，儀表板仍可完成首次轉譯；帳號頁讀取只在可觀察狀態實際改變時發出狀態變更事件，避免自我觸發的重複讀取迴圈。
+- 修正並行作業可能互相覆寫額度狀態的問題。額度讀取改以寫入版本與讀取世代保護，寫入作業的結果不被較舊的讀取覆蓋，兩個並行讀取逆序完成時較舊者不覆寫較新者。
+- 修正 Claude Desktop 啟動沒有回應時帳號切換無限等待的問題。啟動等待上限為 60 秒；逾時後啟動仍在進行時，狀態顯示未知，並拒絕再次啟動與帳號切換寫入，直到該次啟動結束。
+
+### Documentation
+
+- README 新增安裝章節，說明 GitHub Releases 安裝與 WinGet manifest 的實際可用範圍，功能清單補上低額度通知與重複啟動喚醒。
+- README 與 docs/packaging.md 的封裝範例版號更新為 0.2.0。
+
 ## v0.1.0 (2026-11-01)
 
 ### New Features
