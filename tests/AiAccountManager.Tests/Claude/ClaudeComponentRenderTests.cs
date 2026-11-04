@@ -315,6 +315,80 @@ public sealed class ClaudeComponentRenderTests {
     }
 
     [Test]
+    public async Task ClaudePage_AfterRenderRunsAfterDisposal_DoesNotThrow() {
+        ClaudeAccountProfile profile = CreateProfile("Alpha", "account-alpha", "organization-alpha");
+        FakeClaudeAccountRepository repository = new() { Profiles = [profile] };
+        await using ServiceProvider services = CreatePageServices(repository);
+        await using HtmlRenderer renderer = new(services, services.GetRequiredService<ILoggerFactory>());
+        await renderer.Dispatcher.InvokeAsync(() => renderer.RenderComponentAsync<ClaudePage>());
+        ClaudePage page = (ClaudePage)services.GetRequiredService<RecordingComponentActivator>().GetPage<ClaudePage>();
+        page.AccountQuery = profile.ProfileId.ToString();
+
+        await renderer.Dispatcher.InvokeAsync(async () => await page.DisposeAsync());
+        await renderer.Dispatcher.InvokeAsync(((IHandleAfterRender)page).OnAfterRenderAsync);
+    }
+
+    [Test]
+    public async Task ClaudePage_LoadCompletesAfterDisposal_DoesNotShowErrorOrThrow() {
+        FakeInstallationLocator locator = new() {
+            ObserveRelease = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        await using ServiceProvider services = CreatePageServices(new FakeClaudeAccountRepository(), installationLocator: locator);
+        await using HtmlRenderer renderer = new(services, services.GetRequiredService<ILoggerFactory>());
+        HtmlRootComponent root = await renderer.Dispatcher.InvokeAsync(() => renderer.BeginRenderingComponent<ClaudePage>());
+        await locator.ObserveStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        ClaudePage page = (ClaudePage)services.GetRequiredService<RecordingComponentActivator>().GetPage<ClaudePage>();
+        Assert.That(root.QuiescenceTask.IsCompleted, Is.False);
+
+        try {
+            await renderer.Dispatcher.InvokeAsync(async () => await page.DisposeAsync());
+        } finally {
+            locator.ObserveRelease.TrySetResult(true);
+        }
+
+        await root.QuiescenceTask.WaitAsync(TimeSpan.FromSeconds(5));
+        string html = WebUtility.HtmlDecode(await renderer.Dispatcher.InvokeAsync(root.ToHtmlString));
+        Assert.That(html, Does.Not.Contain("無法載入 Claude Desktop 帳號與身分狀態"));
+    }
+
+    [Test]
+    public async Task CodexPage_InitializationCompletesAfterDisposal_DoesNotThrow() {
+        QuotaTestContext context = new();
+        SettingsService settings = new(context.SettingsRepository, context.Catalog);
+        await settings.InitializeAsync(CancellationToken.None);
+        TaskCompletionSource<bool> started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource<bool> release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        CodexDesktopSwitchService desktopSwitch = CodexDesktopSwitchServiceTests.CreateBlockingRenderingService(started, release);
+        await using ServiceProvider services = CreateCodexPageServices(context, settings, new TestResetNewsClient(), desktopSwitch);
+        await using HtmlRenderer renderer = new(services, services.GetRequiredService<ILoggerFactory>());
+        HtmlRootComponent root = await renderer.Dispatcher.InvokeAsync(() => renderer.BeginRenderingComponent<CodexPage>());
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        CodexPage page = (CodexPage)services.GetRequiredService<RecordingComponentActivator>().GetPage<CodexPage>();
+        Assert.That(root.QuiescenceTask.IsCompleted, Is.False);
+
+        try {
+            await renderer.Dispatcher.InvokeAsync(async () => await page.DisposeAsync());
+        } finally {
+            release.TrySetResult(true);
+        }
+        await root.QuiescenceTask.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Test]
+    public async Task CodexPage_AfterRenderRunsAfterDisposal_DoesNotThrow() {
+        QuotaTestContext context = new();
+        SettingsService settings = new(context.SettingsRepository, context.Catalog);
+        await settings.InitializeAsync(CancellationToken.None);
+        await using ServiceProvider services = CreateCodexPageServices(context, settings, new TestResetNewsClient());
+        await using HtmlRenderer renderer = new(services, services.GetRequiredService<ILoggerFactory>());
+        await renderer.Dispatcher.InvokeAsync(() => renderer.RenderComponentAsync<CodexPage>());
+        IHandleAfterRender page = services.GetRequiredService<RecordingComponentActivator>().GetPage<CodexPage>();
+
+        await renderer.Dispatcher.InvokeAsync(async () => await ((IAsyncDisposable)page).DisposeAsync());
+        await renderer.Dispatcher.InvokeAsync(page.OnAfterRenderAsync);
+    }
+
+    [Test]
     public async Task CodexPage_StaleOnEntry_RendersBeforeRefreshAndSkipsFreshAccount() {
         QuotaTestContext context = new();
         context.Clock.UtcNow = DateTimeOffset.UtcNow;
@@ -669,7 +743,8 @@ public sealed class ClaudeComponentRenderTests {
     }
 
     private static ServiceProvider CreateCodexPageServices(
-        QuotaTestContext context, SettingsService settings, TestResetNewsClient news
+        QuotaTestContext context, SettingsService settings, TestResetNewsClient news,
+        CodexDesktopSwitchService? desktopSwitch = null
     ) {
         return AddClaudeComponentRenderingServices(new ServiceCollection())
             .AddSingleton(settings)
@@ -682,7 +757,7 @@ public sealed class ClaudeComponentRenderTests {
             .AddSingleton<CodexResetCreditAutoUseService>()
             .AddSingleton(CodexLocalIdentityServiceTests.CreateRenderingService([context.Account]))
             .AddSingleton(CodexProfileServiceTests.CreateRenderingService())
-            .AddSingleton(CodexDesktopSwitchServiceTests.CreateRenderingService())
+            .AddSingleton(desktopSwitch ?? CodexDesktopSwitchServiceTests.CreateRenderingService())
             .BuildServiceProvider();
     }
     private static async Task<string> RenderAsync<TComponent>(IDictionary<string, object?> parameters)

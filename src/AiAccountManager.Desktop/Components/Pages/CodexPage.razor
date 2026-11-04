@@ -246,6 +246,7 @@
     private readonly object quotaViewLifetimeSync = new();
     private readonly TaskCompletionSource<bool> quotaViewReloadsDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource pageLifetimeCancellation = new();
+    private CancellationToken pageLifetimeToken;
     private CancellationTokenSource? loginCancellation;
     private Task? desktopProcessPolling;
     private string? newAlias;
@@ -267,6 +268,7 @@
     private string? handledAccountQuery;
 
     protected override async Task OnInitializedAsync() {
+        pageLifetimeToken = pageLifetimeCancellation.Token;
         SettingsState.StateChanged += OnStateChanged;
         Profiles.StateChanged += OnStateChanged;
         Quotas.StateChanged += OnQuotaStateChanged;
@@ -274,20 +276,35 @@
         AutoUse.StateChanged += OnLocalIdentityStateChanged;
         LocalIdentity.StateChanged += OnLocalIdentityStateChanged;
         await ReloadQuotaViewsAsync();
+        if (Volatile.Read(ref disposed) != 0) {
+            return;
+        }
         entryViewsLoaded = true;
         await ReloadDesktopStateAsync();
+        if (Volatile.Read(ref disposed) != 0) {
+            return;
+        }
         try {
-            await LocalIdentity.StartMonitoringAsync(pageLifetimeCancellation.Token);
-            await LocalIdentity.ReadProcessStatusAsync(pageLifetimeCancellation.Token);
-            desktopProcessPolling = PollDesktopProcessStatusAsync(pageLifetimeCancellation.Token);
+            await LocalIdentity.StartMonitoringAsync(pageLifetimeToken);
+            if (Volatile.Read(ref disposed) != 0) {
+                return;
+            }
+            await LocalIdentity.ReadProcessStatusAsync(pageLifetimeToken);
+            if (Volatile.Read(ref disposed) != 0) {
+                return;
+            }
+            desktopProcessPolling = PollDesktopProcessStatusAsync(pageLifetimeToken);
         } catch (OperationCanceledException) when (pageLifetimeCancellation.IsCancellationRequested) {
         }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender) {
+        if (Volatile.Read(ref disposed) != 0) {
+            return;
+        }
         if (entryViewsLoaded && !entryRefreshStarted) {
             entryRefreshStarted = true;
-            _ = RefreshStaleOnEntryAsync(SettingsState.Accounts.ToArray(), pageLifetimeCancellation.Token);
+            _ = RefreshStaleOnEntryAsync(SettingsState.Accounts.ToArray(), pageLifetimeToken);
         }
 
         string? requested = AccountQuery;
@@ -295,7 +312,7 @@
             handledAccountQuery = requested;
             if (Guid.TryParse(requested, out Guid accountId)
                 && SettingsState.Accounts.Any(account => account.AccountId == accountId)) {
-                await Js.InvokeVoidAsync("accountNavigation.scrollTo", pageLifetimeCancellation.Token, AccountNavigation.ElementId("codex", accountId), requested);
+                await Js.InvokeVoidAsync("accountNavigation.scrollTo", pageLifetimeToken, AccountNavigation.ElementId("codex", accountId), requested);
             }
         }
     }
@@ -563,7 +580,7 @@
 
     private async Task ReloadDesktopStateAsync() {
         try {
-            desktopState = await DesktopSwitch.GetStateAsync(pageLifetimeCancellation.Token);
+            desktopState = await DesktopSwitch.GetStateAsync(pageLifetimeToken);
         } catch (OperationCanceledException) when (pageLifetimeCancellation.IsCancellationRequested) {
         } catch (Exception) {
             desktopState = null;
@@ -690,8 +707,8 @@
 
         await ReloadDesktopStateAsync();
         try {
-            await LocalIdentity.ReadCurrentSnapshotAsync(pageLifetimeCancellation.Token);
-            await LocalIdentity.ReadProcessStatusAsync(pageLifetimeCancellation.Token);
+            await LocalIdentity.ReadCurrentSnapshotAsync(pageLifetimeToken);
+            await LocalIdentity.ReadProcessStatusAsync(pageLifetimeToken);
         } catch (OperationCanceledException) when (pageLifetimeCancellation.IsCancellationRequested) {
         }
     }
@@ -712,7 +729,7 @@
         await ReloadQuotaViewsAsync();
         if (Volatile.Read(ref disposed) == 0) {
             try {
-                await LocalIdentity.ReadCurrentSnapshotAsync(pageLifetimeCancellation.Token);
+                await LocalIdentity.ReadCurrentSnapshotAsync(pageLifetimeToken);
             } catch (OperationCanceledException) when (
                 pageLifetimeCancellation.IsCancellationRequested
                 || LocalIdentity.CurrentSnapshot.IsMonitoring
@@ -754,7 +771,7 @@
         }
 
         try {
-            await LocalIdentity.ReadCurrentSnapshotAsync(pageLifetimeCancellation.Token);
+            await LocalIdentity.ReadCurrentSnapshotAsync(pageLifetimeToken);
         } catch (OperationCanceledException) when (
             pageLifetimeCancellation.IsCancellationRequested
             || LocalIdentity.CurrentSnapshot.IsMonitoring
