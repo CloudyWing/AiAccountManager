@@ -1,7 +1,10 @@
+using System.Diagnostics;
 using CloudyWing.AiAccountManager.Application.Accounts;
 using CloudyWing.AiAccountManager.Application.Claude;
 using CloudyWing.AiAccountManager.Windows.Claude;
 using NUnit.Framework;
+using PendingLaunchTracker =
+    CloudyWing.AiAccountManager.Windows.Claude.WindowsClaudeDesktopProcessController.PendingLaunchTracker;
 using ClaudeDesktopProcessEnumerationResult =
     CloudyWing.AiAccountManager.Windows.Claude.IClaudeDesktopProcessEnumerator.ClaudeDesktopProcessEnumerationResult;
 using IClaudeDesktopProcessHandle =
@@ -242,6 +245,292 @@ public sealed class WindowsClaudeDesktopProcessControllerTests {
 
         Assert.That(status, Is.EqualTo(IClaudeDesktopProcessController.ProcessStatus.Unknown));
         Assert.That(enumerator.CallCount, Is.Zero);
+    }
+
+    [Test]
+    public async Task LaunchAsync_ReturnsWhenMsixActivationCompletesWithinDeadline() {
+        using WindowsClaudeTestWorkspace workspace = new();
+        string? activatedId = null;
+        WindowsClaudeDesktopProcessController controller = new(
+            new SequenceProcessEnumerator(_ => Result()),
+            TimeSpan.FromMilliseconds(2),
+            id => activatedId = id,
+            TimeSpan.FromSeconds(30)
+        );
+
+        await controller.LaunchAsync(ValidInstallation(workspace), CancellationToken.None);
+
+        Assert.That(activatedId, Is.EqualTo("ClaudeFixture.Package_abcd1234wxyz1!Claude"));
+    }
+
+    [Test]
+    public async Task LaunchAsync_ThrowsTimeoutExceptionWhenMsixActivationStalls() {
+        using WindowsClaudeTestWorkspace workspace = new();
+        using ManualResetEventSlim stall = new(false);
+        PendingLaunchTracker tracker = new();
+        WindowsClaudeDesktopProcessController controller = new(
+            new SequenceProcessEnumerator(_ => Result()),
+            TimeSpan.FromMilliseconds(2),
+            _ => stall.Wait(TimeSpan.FromSeconds(30)),
+            TimeSpan.FromMilliseconds(200),
+            tracker
+        );
+        Stopwatch stopwatch = Stopwatch.StartNew();
+
+        try {
+            // caller 傳入 CancellationToken.None，確認期限獨立於 caller 的 token。
+            await Assert.ThrowsAsync<TimeoutException>(
+                async () => await controller.LaunchAsync(ValidInstallation(workspace), CancellationToken.None)
+            );
+        } finally {
+            ReleaseStall(stall, tracker);
+        }
+
+        Assert.That(stopwatch.Elapsed, Is.LessThan(TimeSpan.FromSeconds(10)));
+    }
+
+    [Test]
+    public async Task LaunchAsync_ThrowsOperationCanceledExceptionWhenCallerTokenIsCanceled() {
+        using WindowsClaudeTestWorkspace workspace = new();
+        using CancellationTokenSource cancellation = new();
+        cancellation.Cancel();
+        int activationCount = 0;
+        WindowsClaudeDesktopProcessController controller = new(
+            new SequenceProcessEnumerator(_ => Result()),
+            TimeSpan.FromMilliseconds(2),
+            _ => activationCount++,
+            TimeSpan.FromSeconds(30)
+        );
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            async () => await controller.LaunchAsync(ValidInstallation(workspace), cancellation.Token)
+        );
+
+        Assert.That(activationCount, Is.Zero);
+    }
+
+    [Test]
+    public async Task GetStatusAsync_ReturnsUnknownWhileStalledLaunchIsPending() {
+        using WindowsClaudeTestWorkspace workspace = new();
+        using ManualResetEventSlim stall = new(false);
+        PendingLaunchTracker tracker = new();
+        WindowsClaudeDesktopProcessController controller = CreateStallingController(stall, tracker);
+
+        try {
+            await Assert.ThrowsAsync<TimeoutException>(
+                async () => await controller.LaunchAsync(ValidInstallation(workspace), CancellationToken.None)
+            );
+
+            IClaudeDesktopProcessController.ProcessStatus status =
+                await controller.GetStatusAsync(ValidInstallation(workspace), CancellationToken.None);
+
+            Assert.That(status, Is.EqualTo(IClaudeDesktopProcessController.ProcessStatus.Unknown));
+        } finally {
+            ReleaseStall(stall, tracker);
+        }
+    }
+
+    [Test]
+    public async Task GetStatusAsync_ReturnsNotRunningAfterStalledLaunchCompletes() {
+        using WindowsClaudeTestWorkspace workspace = new();
+        using ManualResetEventSlim stall = new(false);
+        PendingLaunchTracker tracker = new();
+        WindowsClaudeDesktopProcessController controller = CreateStallingController(stall, tracker);
+        IClaudeDesktopProcessController.ProcessStatus status;
+
+        try {
+            await Assert.ThrowsAsync<TimeoutException>(
+                async () => await controller.LaunchAsync(ValidInstallation(workspace), CancellationToken.None)
+            );
+        } finally {
+            ReleaseStall(stall, tracker);
+        }
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        do {
+            status = await controller.GetStatusAsync(ValidInstallation(workspace), CancellationToken.None);
+            if (status != IClaudeDesktopProcessController.ProcessStatus.Unknown) {
+                break;
+            }
+
+            await Task.Delay(20);
+        } while (stopwatch.Elapsed < TimeSpan.FromSeconds(10));
+
+        Assert.That(status, Is.EqualTo(IClaudeDesktopProcessController.ProcessStatus.NotRunning));
+    }
+
+    [Test]
+    public async Task LaunchAsync_ThrowsInvalidOperationExceptionWhileStalledLaunchIsPending() {
+        using WindowsClaudeTestWorkspace workspace = new();
+        using ManualResetEventSlim stall = new(false);
+        PendingLaunchTracker tracker = new();
+        int activationCount = 0;
+        WindowsClaudeDesktopProcessController controller = new(
+            new SequenceProcessEnumerator(_ => Result()),
+            TimeSpan.FromMilliseconds(2),
+            _ => {
+                Interlocked.Increment(ref activationCount);
+                stall.Wait(TimeSpan.FromSeconds(30));
+            },
+            TimeSpan.FromMilliseconds(200),
+            tracker
+        );
+
+        try {
+            await Assert.ThrowsAsync<TimeoutException>(
+                async () => await controller.LaunchAsync(ValidInstallation(workspace), CancellationToken.None)
+            );
+
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await controller.LaunchAsync(ValidInstallation(workspace), CancellationToken.None)
+            );
+
+            Assert.That(Volatile.Read(ref activationCount), Is.EqualTo(1));
+        } finally {
+            ReleaseStall(stall, tracker);
+        }
+    }
+
+    [Test]
+    public async Task LaunchAsync_ThrowsInvalidOperationExceptionWhileAnotherLaunchIsInFlight() {
+        using WindowsClaudeTestWorkspace workspace = new();
+        using ManualResetEventSlim stall = new(false);
+        using ManualResetEventSlim entered = new(false);
+        PendingLaunchTracker tracker = new();
+        int activationCount = 0;
+        WindowsClaudeDesktopProcessController controller = new(
+            new SequenceProcessEnumerator(_ => Result()),
+            TimeSpan.FromMilliseconds(2),
+            _ => {
+                Interlocked.Increment(ref activationCount);
+                entered.Set();
+                stall.Wait(TimeSpan.FromSeconds(30));
+            },
+            TimeSpan.FromSeconds(30),
+            tracker
+        );
+        Task? firstLaunch = null;
+
+        try {
+            firstLaunch = controller.LaunchAsync(ValidInstallation(workspace), CancellationToken.None);
+
+            Assert.That(entered.Wait(TimeSpan.FromSeconds(10)), Is.True);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await controller.LaunchAsync(ValidInstallation(workspace), CancellationToken.None)
+            );
+
+            Assert.That(Volatile.Read(ref activationCount), Is.EqualTo(1));
+        } finally {
+            stall.Set();
+            if (firstLaunch is not null) {
+                await firstLaunch;
+            }
+        }
+
+        Assert.That(firstLaunch.IsCompletedSuccessfully, Is.True);
+    }
+
+    [Test]
+    public async Task CloseGracefullyAsync_ReturnsFalseWhileStalledLaunchIsPending() {
+        using WindowsClaudeTestWorkspace workspace = new();
+        using ManualResetEventSlim stall = new(false);
+        PendingLaunchTracker tracker = new();
+        FakeProcessHandle process = new(101, ProcessStart);
+        SequenceProcessEnumerator enumerator = new(_ => Result(process));
+        WindowsClaudeDesktopProcessController controller = new(
+            enumerator,
+            TimeSpan.FromMilliseconds(2),
+            _ => stall.Wait(TimeSpan.FromSeconds(30)),
+            TimeSpan.FromMilliseconds(200),
+            tracker
+        );
+
+        try {
+            await Assert.ThrowsAsync<TimeoutException>(
+                async () => await controller.LaunchAsync(ValidInstallation(workspace), CancellationToken.None)
+            );
+
+            bool closed = await controller.CloseGracefullyAsync(
+                ValidInstallation(workspace),
+                TimeSpan.FromSeconds(1),
+                CancellationToken.None
+            );
+
+            Assert.That(closed, Is.False);
+            Assert.That(process.CloseRequestCount, Is.Zero);
+            Assert.That(enumerator.CallCount, Is.Zero);
+        } finally {
+            ReleaseStall(stall, tracker);
+        }
+    }
+
+    [Test]
+    public async Task GetStatusAsync_ReturnsUnknownOnOtherControllerSharingTheTracker() {
+        using WindowsClaudeTestWorkspace workspace = new();
+        using ManualResetEventSlim stall = new(false);
+        PendingLaunchTracker tracker = new();
+        WindowsClaudeDesktopProcessController launcher = CreateStallingController(stall, tracker);
+        WindowsClaudeDesktopProcessController observer = new(
+            new SequenceProcessEnumerator(_ => Result()),
+            TimeSpan.FromMilliseconds(2),
+            null,
+            null,
+            tracker
+        );
+
+        try {
+            await Assert.ThrowsAsync<TimeoutException>(
+                async () => await launcher.LaunchAsync(ValidInstallation(workspace), CancellationToken.None)
+            );
+
+            IClaudeDesktopProcessController.ProcessStatus status =
+                await observer.GetStatusAsync(ValidInstallation(workspace), CancellationToken.None);
+
+            Assert.That(status, Is.EqualTo(IClaudeDesktopProcessController.ProcessStatus.Unknown));
+        } finally {
+            ReleaseStall(stall, tracker);
+        }
+    }
+
+    [Test]
+    public async Task LaunchAsync_PropagatesActivatorTimeoutExceptionAndDoesNotMarkLaunchPending() {
+        using WindowsClaudeTestWorkspace workspace = new();
+        PendingLaunchTracker tracker = new();
+        WindowsClaudeDesktopProcessController controller = new(
+            new SequenceProcessEnumerator(_ => Result()),
+            TimeSpan.FromMilliseconds(2),
+            _ => throw new TimeoutException("inner"),
+            TimeSpan.FromSeconds(30),
+            tracker
+        );
+
+        TimeoutException? failure = await Assert.ThrowsAsync<TimeoutException>(
+            async () => await controller.LaunchAsync(ValidInstallation(workspace), CancellationToken.None)
+        );
+        IClaudeDesktopProcessController.ProcessStatus status =
+            await controller.GetStatusAsync(ValidInstallation(workspace), CancellationToken.None);
+
+        Assert.That(failure!.Message, Is.EqualTo("inner"));
+        Assert.That(status, Is.Not.EqualTo(IClaudeDesktopProcessController.ProcessStatus.Unknown));
+    }
+
+    private static WindowsClaudeDesktopProcessController CreateStallingController(
+        ManualResetEventSlim stall,
+        PendingLaunchTracker tracker
+    ) {
+        return new WindowsClaudeDesktopProcessController(
+            new SequenceProcessEnumerator(_ => Result()),
+            TimeSpan.FromMilliseconds(2),
+            _ => stall.Wait(TimeSpan.FromSeconds(30)),
+            TimeSpan.FromMilliseconds(200),
+            tracker
+        );
+    }
+
+    private static void ReleaseStall(ManualResetEventSlim stall, PendingLaunchTracker tracker) {
+        stall.Set();
+        SpinWait.SpinUntil(() => !tracker.IsPending, TimeSpan.FromSeconds(10));
     }
 
     private static ClaudeDesktopProcessEnumerationResult Result(

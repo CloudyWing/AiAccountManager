@@ -15,7 +15,11 @@ namespace CloudyWing.AiAccountManager.Windows.Claude;
 public sealed class WindowsClaudeDesktopProcessController : IClaudeDesktopProcessController {
     private const string DesktopExecutableName = "Claude.exe";
     private const int PollIntervalMilliseconds = 100;
+    private const int LaunchTimeoutMilliseconds = 60_000;
+    private static readonly PendingLaunchTracker SharedPendingLaunchTracker = new();
     private readonly IClaudeDesktopProcessEnumerator processEnumerator;
+    private readonly Action<string> msixActivator;
+    private readonly PendingLaunchTracker pendingLaunchTracker;
 
     /// <summary>
     /// 建立使用 Windows 程序列舉器的 Claude Desktop 程序控制器。
@@ -26,7 +30,10 @@ public sealed class WindowsClaudeDesktopProcessController : IClaudeDesktopProces
 
     internal WindowsClaudeDesktopProcessController(
         IClaudeDesktopProcessEnumerator processEnumerator,
-        TimeSpan? pollInterval = null
+        TimeSpan? pollInterval = null,
+        Action<string>? msixActivator = null,
+        TimeSpan? launchTimeout = null,
+        PendingLaunchTracker? pendingLaunchTracker = null
     ) {
         ArgumentNullException.ThrowIfNull(processEnumerator);
         this.processEnumerator = processEnumerator;
@@ -34,9 +41,20 @@ public sealed class WindowsClaudeDesktopProcessController : IClaudeDesktopProces
         if (PollInterval <= TimeSpan.Zero || PollInterval > TimeSpan.FromSeconds(5)) {
             throw new ArgumentOutOfRangeException(nameof(pollInterval));
         }
+
+        // MSIX 冷啟動在慢速磁碟上可能耗時數秒至數十秒，60 秒明顯長於正常啟動，且遠短於無上界等待。
+        LaunchTimeout = launchTimeout ?? TimeSpan.FromMilliseconds(LaunchTimeoutMilliseconds);
+        if (LaunchTimeout <= TimeSpan.Zero || LaunchTimeout > TimeSpan.FromMilliseconds(LaunchTimeoutMilliseconds)) {
+            throw new ArgumentOutOfRangeException(nameof(launchTimeout));
+        }
+
+        this.msixActivator = msixActivator ?? ActivateMsix;
+        this.pendingLaunchTracker = pendingLaunchTracker ?? SharedPendingLaunchTracker;
     }
 
     private TimeSpan PollInterval { get; }
+
+    private TimeSpan LaunchTimeout { get; }
 
     /// <inheritdoc />
     public Task<IClaudeDesktopProcessController.ProcessStatus> GetStatusAsync(
@@ -45,6 +63,11 @@ public sealed class WindowsClaudeDesktopProcessController : IClaudeDesktopProces
     ) {
         ArgumentNullException.ThrowIfNull(installation);
         cancellationToken.ThrowIfCancellationRequested();
+        // 逾時後仍在進行的啟動可能隨時啟動程序，此期間無法確認程序狀態，一律回報 Unknown。
+        if (pendingLaunchTracker.IsPending) {
+            return Task.FromResult(IClaudeDesktopProcessController.ProcessStatus.Unknown);
+        }
+
         try {
             ValidateInstallation(installation);
         } catch (Exception failure) when (IsProcessAccessFailure(failure) || failure is IOException or ArgumentException) {
@@ -97,6 +120,10 @@ public sealed class WindowsClaudeDesktopProcessController : IClaudeDesktopProces
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        if (pendingLaunchTracker.IsPending) {
+            return false;
+        }
+
         try {
             ValidateInstallation(installation);
         } catch (Exception failure) when (IsProcessAccessFailure(failure) || failure is IOException or ArgumentException) {
@@ -175,6 +202,10 @@ public sealed class WindowsClaudeDesktopProcessController : IClaudeDesktopProces
         ValidateInstallation(installation);
         if (!HasSourceEvidence(installation)) {
             throw new InvalidOperationException("Claude Desktop source evidence is unavailable.");
+        }
+
+        if (pendingLaunchTracker.IsPending) {
+            throw new InvalidOperationException("Claude Desktop launch is still pending.");
         }
 
         if (installation.Kind == IClaudeDesktopInstallationLocator.InstallKind.Direct) {
@@ -260,25 +291,47 @@ public sealed class WindowsClaudeDesktopProcessController : IClaudeDesktopProces
             && !string.IsNullOrWhiteSpace(source.WindowsUserSid);
     }
 
-    private static Task ActivateMsixAsync(string appUserModelId, CancellationToken cancellationToken) {
+    private async Task ActivateMsixAsync(string appUserModelId, CancellationToken cancellationToken) {
         TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        Thread activationThread = new(() => {
-            try {
-                cancellationToken.ThrowIfCancellationRequested();
-                ActivateMsix(appUserModelId);
-                completion.TrySetResult();
-            } catch (OperationCanceledException failure) {
-                completion.TrySetCanceled(failure.CancellationToken);
-            } catch (Exception failure) {
-                completion.TrySetException(failure);
+        if (!pendingLaunchTracker.TryBegin(completion.Task)) {
+            throw new InvalidOperationException("Claude Desktop launch is still pending.");
+        }
+
+        try {
+            Thread activationThread = new(() => {
+                try {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    msixActivator(appUserModelId);
+                    completion.TrySetResult();
+                } catch (OperationCanceledException failure) {
+                    completion.TrySetCanceled(failure.CancellationToken);
+                } catch (Exception failure) {
+                    completion.TrySetException(failure);
+                }
+            }) {
+                IsBackground = true,
+                Name = "Claude Desktop activation"
+            };
+            activationThread.SetApartmentState(ApartmentState.STA);
+            activationThread.Start();
+        } catch (Exception failure) {
+            // 執行緒未啟動時 delegate 不會完成 task，必須在此完成，否則保留會永久佔住。
+            completion.TrySetException(failure);
+            throw;
+        }
+
+        try {
+            await completion.Task.WaitAsync(LaunchTimeout).ConfigureAwait(false);
+        } catch (TimeoutException) {
+            if (completion.Task.IsCompleted) {
+                // 逾時與啟動完成同時發生時，以啟動的實際結果為準，包含 activator 自己拋出的 TimeoutException。
+                await completion.Task.ConfigureAwait(false);
+                return;
             }
-        }) {
-            IsBackground = true,
-            Name = "Claude Desktop activation"
-        };
-        activationThread.SetApartmentState(ApartmentState.STA);
-        activationThread.Start();
-        return completion.Task;
+
+            pendingLaunchTracker.MarkAbandoned(completion.Task);
+            throw new TimeoutException("Claude Desktop launch wait timed out.");
+        }
     }
 
     private static void ActivateMsix(string appUserModelId) {
@@ -318,6 +371,43 @@ public sealed class WindowsClaudeDesktopProcessController : IClaudeDesktopProces
     private static void DisposeHandles(IEnumerable<IClaudeDesktopProcessHandle> processes) {
         foreach (IClaudeDesktopProcessHandle process in processes) {
             process.Dispose();
+        }
+    }
+
+    internal sealed class PendingLaunchTracker {
+        private readonly object syncRoot = new();
+        private Task? activeLaunch;
+        private bool isAbandoned;
+
+        public bool IsPending {
+            get {
+                lock (syncRoot) {
+                    return isAbandoned && activeLaunch is { IsCompleted: false };
+                }
+            }
+        }
+
+        public bool TryBegin(Task launch) {
+            ArgumentNullException.ThrowIfNull(launch);
+            lock (syncRoot) {
+                // 檢查與保留在同一個 lock 內完成，並行呼叫不會各自建立 STA 執行緒。
+                if (activeLaunch is { IsCompleted: false }) {
+                    return false;
+                }
+
+                activeLaunch = launch;
+                isAbandoned = false;
+                return true;
+            }
+        }
+
+        public void MarkAbandoned(Task launch) {
+            ArgumentNullException.ThrowIfNull(launch);
+            lock (syncRoot) {
+                if (ReferenceEquals(activeLaunch, launch)) {
+                    isAbandoned = true;
+                }
+            }
         }
     }
 
