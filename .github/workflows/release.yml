@@ -44,7 +44,8 @@ jobs:
         run: dotnet build .\AiAccountManager.slnx -c Release --no-restore -p:Version=${{ env.APP_VERSION }} -p:CodexAppServerZipPath=${{ env.CODEX_APP_SERVER_ZIP }}
 
       - name: Test
-        run: dotnet test .\AiAccountManager.slnx -c Release --no-build --verbosity minimal
+        # UI 測試需要互動式桌面並會啟動實際程式，release 流程只跑單元與元件測試。
+        run: dotnet test .\AiAccountManager.slnx -c Release --no-build --verbosity minimal --filter "TestCategory!=UI"
 
       - name: Package
         shell: pwsh

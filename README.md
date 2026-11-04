@@ -32,7 +32,7 @@ Windows x64 桌面應用程式，以 WPF 承載 Blazor Hybrid 與 MudBlazor。�
 - WPF + Microsoft.NET.Sdk.Razor Blazor Hybrid、WebView2 Evergreen Runtime、MudBlazor。
 - Codex app-server rust-v0.162.1，封裝與執行前都核對官方 release binary hash。
 - Velopack 1.2.161；NuGet 套件版本集中於 Directory.Packages.props。
-- NUnit 5 測試專案。
+- NUnit 5 測試專案；元件互動測試使用 bUnit，端對端 UI 測試使用 FlaUI（UIA3）。
 
 安裝器會處理 Microsoft Edge WebView2 Evergreen Runtime，程式啟動時仍會檢查 Runtime。產品使用目前 Windows 使用者的 DPAPI 保護本機 identity key；Codex OAuth token 由隔離 profile 的 Codex app-server/keyring 管理，不寫入產品 JSON 檔。
 
@@ -56,7 +56,22 @@ $env:DOTNET_NOLOGO = '1'
 dotnet restore .\AiAccountManager.slnx
 dotnet build .\AiAccountManager.slnx -c Release --no-restore
 dotnet test .\tests\AiAccountManager.Tests\AiAccountManager.Tests.csproj -c Release --no-build --no-restore
+dotnet test .\tests\AiAccountManager.Components.Tests\AiAccountManager.Components.Tests.csproj -c Release --no-build --no-restore
 ```
+
+測試專案分工：
+
+- `AiAccountManager.Tests`：Application、Windows 介面卡與頁面靜態渲染測試。
+- `AiAccountManager.Components.Tests`：以 bUnit 驗證 Razor 元件的點擊、輸入與 callback 行為。
+- `AiAccountManager.UiTests`：以 FlaUI 啟動實際的桌面程式，驗證主視窗、WebView2 內容與頁面導覽；測試分類為 `UI`。
+
+UI 測試需要互動式 Windows 桌面與 WebView2 Runtime，並會啟動與測試相同組態建置的 Desktop 執行檔。程式以 `--data-root` 指向暫存目錄，不讀寫 `%LOCALAPPDATA%\AiAccountManager\data`；但仍會讀取本機 Claude Desktop 與 Codex 的安裝與登入狀態。程式採單一執行個體，執行 UI 測試前請先結束正在執行的 AI 帳號管理工具，否則測試會略過。
+
+```powershell
+dotnet test .\tests\AiAccountManager.UiTests\AiAccountManager.UiTests.csproj -c Release --no-build --no-restore
+```
+
+若要測試其他位置的執行檔，可設定 `AIACCOUNTMANAGER_DESKTOP_EXE` 環境變數指定完整路徑。執行整個方案的測試時，可用 `--filter "TestCategory!=UI"` 排除 UI 測試。
 
 所有驗證與 packaging 命令需在 Windows 執行。細節見 [docs/packaging.md](docs/packaging.md)。
 

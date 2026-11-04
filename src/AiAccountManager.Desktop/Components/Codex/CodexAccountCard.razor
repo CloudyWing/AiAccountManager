@@ -36,7 +36,7 @@
                                OnClick="RefreshAsync" />
                 <MudIconButton Icon="@ExpandIcon"
                                Color="Color.Default"
-                               aria-expanded="@expanded"
+                               aria-expanded="@(expanded ? "true" : "false")"
                                aria-label="@(expanded ? $"收合 {DisplayName} 詳細資料" : $"展開 {DisplayName} 詳細資料")"
                                OnClick="ToggleExpanded" />
             </div>
