@@ -16,6 +16,9 @@ public sealed class ClaudeQuotaService {
     private readonly IClock clock;
     private readonly object stateLock = new();
     private readonly Dictionary<Guid, ClaudeQuotaSnapshot.View> currentViews = [];
+    private readonly Dictionary<Guid, long> writeVersions = [];
+    private readonly Dictionary<Guid, long> readSequences = [];
+    private readonly Dictionary<Guid, long> publishedReadSequences = [];
 
     /// <summary>
     /// 建立 Claude quota 查詢服務。
@@ -59,25 +62,28 @@ public sealed class ClaudeQuotaService {
     }
 
     /// <summary>
-    /// 載入指定 profile 最近一次保存的 quota view。
+    /// 載入指定 profile 最近一次保存的 quota view。此讀取不進入 Claude 作業閘門，
+    /// 因此不會被進行中的網路作業阻擋；與寫入作業的競態由 profile 寫入版本檢查處理。
     /// </summary>
     /// <param name="profileId">quota 所屬的 Claude profile 識別碼。</param>
     /// <param name="cancellationToken">取消載入作業的權杖。</param>
     /// <returns>最近一次保存的額度資料。</returns>
     public async Task<ClaudeQuotaSnapshot.View> GetViewAsync(Guid profileId, CancellationToken cancellationToken) {
-        await using ClaudeOperationGate.Lease lease = await operationGate
-            .EnterAsync(cancellationToken)
-            .ConfigureAwait(false);
-
+        long observedVersion;
+        long readTicket;
         lock (stateLock) {
             if (currentViews.TryGetValue(profileId, out ClaudeQuotaSnapshot.View? current)
                 && current.Status == ClaudeQuotaSnapshot.RefreshStatus.Refreshing) {
                 return current;
             }
+
+            observedVersion = writeVersions.GetValueOrDefault(profileId);
+            readTicket = readSequences.GetValueOrDefault(profileId) + 1;
+            readSequences[profileId] = readTicket;
         }
 
         IClaudeQuotaRepository.Snapshot? snapshot = await quotaRepository
-            .LoadAsync(profileId, lease.CancellationToken)
+            .LoadAsync(profileId, cancellationToken)
             .ConfigureAwait(false);
         ClaudeQuotaSnapshot.View view = snapshot?.View ?? new(
             profileId,
@@ -95,7 +101,31 @@ public sealed class ClaudeQuotaService {
             };
         }
 
-        SetView(view);
+        bool changed;
+        lock (stateLock) {
+            // 讀取期間若有寫入作業更新同一 profile，該結果比本次載入的快照新，不得被覆蓋。
+            if (writeVersions.GetValueOrDefault(profileId) != observedVersion
+                && currentViews.TryGetValue(profileId, out ClaudeQuotaSnapshot.View? latest)) {
+                return latest;
+            }
+
+            // 較新的讀取已經發佈時，本次較舊的讀取結果不得蓋回。判定依據是已發佈的最大序號，
+            // 不是已配發的最大序號，較新的讀取尚未完成時，較舊的讀取仍可發佈。
+            if (readTicket < publishedReadSequences.GetValueOrDefault(profileId)
+                && currentViews.TryGetValue(profileId, out ClaudeQuotaSnapshot.View? newerPublished)) {
+                return newerPublished;
+            }
+
+            publishedReadSequences[profileId] = readTicket;
+            changed = !currentViews.TryGetValue(profileId, out ClaudeQuotaSnapshot.View? previous)
+                || !HasSameContent(previous, view);
+            currentViews[profileId] = view;
+        }
+
+        if (changed) {
+            StateChanged?.Invoke(this, EventArgs.Empty);
+        }
+
         return view;
     }
 
@@ -404,9 +434,33 @@ public sealed class ClaudeQuotaService {
     private void SetView(ClaudeQuotaSnapshot.View view) {
         lock (stateLock) {
             currentViews[view.ProfileId] = view;
+            writeVersions[view.ProfileId] = writeVersions.GetValueOrDefault(view.ProfileId) + 1;
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static bool HasSameContent(ClaudeQuotaSnapshot.View left, ClaudeQuotaSnapshot.View right) {
+        if (left.ProfileId != right.ProfileId
+            || left.Status != right.Status
+            || left.LastAttemptAtUtc != right.LastAttemptAtUtc
+            || left.Message != right.Message
+            || left.RetryAfterUtc != right.RetryAfterUtc) {
+            return false;
+        }
+
+        if (left.Snapshot is null || right.Snapshot is null) {
+            return left.Snapshot is null && right.Snapshot is null;
+        }
+
+        return left.Snapshot.ProfileId == right.Snapshot.ProfileId
+            && left.Snapshot.RetrievedAtUtc == right.Snapshot.RetrievedAtUtc
+            && left.Snapshot.Windows.SequenceEqual(right.Snapshot.Windows)
+            && SequenceEqualOrBothNull(left.Snapshot.ResetGrants, right.Snapshot.ResetGrants);
+    }
+
+    private static bool SequenceEqualOrBothNull<T>(IReadOnlyList<T>? left, IReadOnlyList<T>? right) {
+        return left is null || right is null ? left is null && right is null : left.SequenceEqual(right);
     }
 
     private static bool IsProfileSnapshot(

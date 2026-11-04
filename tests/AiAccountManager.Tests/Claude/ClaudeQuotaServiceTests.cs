@@ -28,6 +28,136 @@ public sealed class ClaudeQuotaServiceTests {
         Assert.That(setup.OAuth.UsageTokens, Is.EqualTo(new[] { "token-a" }));
     }
 
+    [Test]
+    public async Task GetViewAsync_WhenAnotherOperationHoldsTheGate_CompletesWithinTheRenderWindow() {
+        (ClaudeAccountProfile profile, _, ClaudeTestAccountRepository accountRepository,
+            ClaudeTestProfileStore profileStore, ClaudeTestOAuthClient oauth) = CreateSingleProfile(
+                IClaudeOAuthClient.Outcome.Success
+            );
+        ClaudeTestQuotaRepository quotaRepository = new();
+        quotaRepository.Seed(new(
+            profile.ProfileId,
+            new(profile.ProfileId, ClaudeTestData.Now, [new("session", 300, 20m, ClaudeTestData.Now.AddHours(1))]),
+            ClaudeQuotaSnapshot.RefreshStatus.Fresh,
+            null,
+            null
+        ));
+        ClaudeOperationGate operationGate = ClaudeTestData.CreateOperationGate();
+        ClaudeQuotaService service = new(
+            accountRepository,
+            profileStore,
+            oauth,
+            quotaRepository,
+            operationGate,
+            new ClaudeTestClock()
+        );
+        await using ClaudeOperationGate.Lease backgroundLease = await operationGate.EnterAsync(CancellationToken.None);
+
+        ClaudeQuotaSnapshot.View view = await service.GetViewAsync(profile.ProfileId, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.That(view.Status, Is.EqualTo(ClaudeQuotaSnapshot.RefreshStatus.Fresh));
+    }
+
+    [Test]
+    public async Task GetViewAsync_WhenSavedStateIsUnchanged_DoesNotRaiseRepeatedStateChanges() {
+        (ClaudeAccountProfile profile, _, ClaudeTestAccountRepository accountRepository,
+            ClaudeTestProfileStore profileStore, ClaudeTestOAuthClient oauth) = CreateSingleProfile(
+                IClaudeOAuthClient.Outcome.Success
+            );
+        ClaudeTestQuotaRepository quotaRepository = new();
+        quotaRepository.Seed(new(
+            profile.ProfileId,
+            new(profile.ProfileId, ClaudeTestData.Now, [new("session", 300, 20m, ClaudeTestData.Now.AddHours(1))]),
+            ClaudeQuotaSnapshot.RefreshStatus.Fresh,
+            null,
+            null
+        ));
+        ClaudeQuotaService service = CreateService(accountRepository, profileStore, oauth, quotaRepository);
+        int stateChangeCount = 0;
+        service.StateChanged += (_, _) => stateChangeCount++;
+
+        await service.GetViewAsync(profile.ProfileId, CancellationToken.None);
+        await service.GetViewAsync(profile.ProfileId, CancellationToken.None);
+
+        Assert.That(stateChangeCount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task GetViewAsync_WhenOlderReadCompletesAfterNewerRead_DoesNotOverwriteNewerPublishedView() {
+        (ClaudeAccountProfile profile, _, ClaudeTestAccountRepository accountRepository,
+            ClaudeTestProfileStore profileStore, ClaudeTestOAuthClient oauth) = CreateSingleProfile(
+                IClaudeOAuthClient.Outcome.Success
+            );
+        ClaudeTestQuotaRepository inner = new();
+        ClaudeQuotaSnapshot.View olderView = CreateFreshView(profile.ProfileId, 20m);
+        ClaudeQuotaSnapshot.View newerView = CreateFreshView(profile.ProfileId, 80m);
+        inner.Seed(olderView);
+        GatedLoadQuotaRepository quotaRepository = new(inner, 1);
+        ClaudeQuotaService service = CreateService(accountRepository, profileStore, oauth, quotaRepository);
+        int stateChangeCount = 0;
+        service.StateChanged += (_, _) => stateChangeCount++;
+        Task<ClaudeQuotaSnapshot.View> olderRead = service.GetViewAsync(profile.ProfileId, CancellationToken.None);
+        await quotaRepository.Entered(1).WaitAsync(TimeSpan.FromSeconds(2));
+        inner.Seed(newerView);
+
+        ClaudeQuotaSnapshot.View newerResult = await service
+            .GetViewAsync(profile.ProfileId, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(2));
+        int stateChangeCountAfterNewer = stateChangeCount;
+        quotaRepository.Release(1);
+        ClaudeQuotaSnapshot.View olderResult = await olderRead.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Multiple(() => {
+            Assert.That(newerResult, Is.SameAs(newerView));
+            Assert.That(service.GetCurrentView(profile.ProfileId), Is.SameAs(newerView));
+            Assert.That(olderResult, Is.SameAs(newerView));
+            Assert.That(stateChangeCount, Is.EqualTo(stateChangeCountAfterNewer));
+        });
+    }
+
+    [Test]
+    public async Task GetViewAsync_WhenNewerReadHasNotPublished_OlderReadStillPublishes() {
+        (ClaudeAccountProfile profile, _, ClaudeTestAccountRepository accountRepository,
+            ClaudeTestProfileStore profileStore, ClaudeTestOAuthClient oauth) = CreateSingleProfile(
+                IClaudeOAuthClient.Outcome.Success
+            );
+        ClaudeTestQuotaRepository inner = new();
+        ClaudeQuotaSnapshot.View olderView = CreateFreshView(profile.ProfileId, 20m);
+        ClaudeQuotaSnapshot.View newerView = CreateFreshView(profile.ProfileId, 80m);
+        inner.Seed(olderView);
+        GatedLoadQuotaRepository quotaRepository = new(inner, 1, 2);
+        ClaudeQuotaService service = CreateService(accountRepository, profileStore, oauth, quotaRepository);
+        Task<ClaudeQuotaSnapshot.View> olderRead = service.GetViewAsync(profile.ProfileId, CancellationToken.None);
+        await quotaRepository.Entered(1).WaitAsync(TimeSpan.FromSeconds(2));
+        inner.Seed(newerView);
+        Task<ClaudeQuotaSnapshot.View> newerRead = service.GetViewAsync(profile.ProfileId, CancellationToken.None);
+        await quotaRepository.Entered(2).WaitAsync(TimeSpan.FromSeconds(2));
+
+        quotaRepository.Release(1);
+        ClaudeQuotaSnapshot.View olderResult = await olderRead.WaitAsync(TimeSpan.FromSeconds(2));
+        ClaudeQuotaSnapshot.View? publishedAfterOlder = service.GetCurrentView(profile.ProfileId);
+        quotaRepository.Release(2);
+        ClaudeQuotaSnapshot.View newerResult = await newerRead.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Multiple(() => {
+            Assert.That(olderResult, Is.SameAs(olderView));
+            Assert.That(publishedAfterOlder, Is.SameAs(olderView));
+            Assert.That(newerResult, Is.SameAs(newerView));
+            Assert.That(service.GetCurrentView(profile.ProfileId), Is.SameAs(newerView));
+        });
+    }
+
+    private static ClaudeQuotaSnapshot.View CreateFreshView(Guid profileId, decimal percent) {
+        return new(
+            profileId,
+            new(profileId, ClaudeTestData.Now, [new("session", 300, percent, ClaudeTestData.Now.AddHours(1))]),
+            ClaudeQuotaSnapshot.RefreshStatus.Fresh,
+            null,
+            null
+        );
+    }
+
     private static async Task WaitForIntervalAsync(ClaudeQuotaScheduler scheduler, int interval) {
         DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(5);
         while (scheduler.CurrentIntervalMinutes != interval) {
@@ -254,6 +384,22 @@ public sealed class ClaudeQuotaServiceTests {
         ClaudeTestAccountRepository accountRepository,
         ClaudeTestProfileStore profileStore,
         ClaudeTestOAuthClient oauth,
+        IClaudeQuotaRepository quotaRepository
+    ) {
+        return new(
+            accountRepository,
+            profileStore,
+            oauth,
+            quotaRepository,
+            ClaudeTestData.CreateOperationGate(),
+            new ClaudeTestClock()
+        );
+    }
+
+    private static ClaudeQuotaService CreateService(
+        ClaudeTestAccountRepository accountRepository,
+        ClaudeTestProfileStore profileStore,
+        ClaudeTestOAuthClient oauth,
         ClaudeTestQuotaRepository quotaRepository
     ) {
         return new(
@@ -289,5 +435,47 @@ public sealed class ClaudeQuotaServiceTests {
             ? ClaudeTestData.VerifiedProfile("account-a", "org-a")
             : new(profileOutcome, null, null, null, null, "synthetic_profile_failure");
         return (profile, snapshot, accountRepository, profileStore, oauth);
+    }
+
+    private sealed class GatedLoadQuotaRepository : IClaudeQuotaRepository {
+        private readonly ClaudeTestQuotaRepository inner;
+        private readonly Dictionary<int, TaskCompletionSource> entered = [];
+        private readonly Dictionary<int, TaskCompletionSource> release = [];
+        private int loadCallCount;
+
+        public GatedLoadQuotaRepository(ClaudeTestQuotaRepository inner, params int[] gatedCalls) {
+            this.inner = inner;
+            foreach (int call in gatedCalls) {
+                entered[call] = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                release[call] = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+        }
+
+        public Task Entered(int call) {
+            return entered[call].Task;
+        }
+
+        public void Release(int call) {
+            release[call].TrySetResult();
+        }
+
+        public async Task<IClaudeQuotaRepository.Snapshot?> LoadAsync(Guid profileId, CancellationToken cancellationToken) {
+            int call = Interlocked.Increment(ref loadCallCount);
+            IClaudeQuotaRepository.Snapshot? snapshot = await inner.LoadAsync(profileId, cancellationToken);
+            if (entered.TryGetValue(call, out TaskCompletionSource? enteredSignal)) {
+                enteredSignal.TrySetResult();
+                await release[call].Task.WaitAsync(cancellationToken);
+            }
+
+            return snapshot;
+        }
+
+        public Task<IClaudeQuotaRepository.SaveResult> SaveAsync(
+            ClaudeQuotaSnapshot.View view,
+            string? expectedSha256,
+            CancellationToken cancellationToken
+        ) {
+            return inner.SaveAsync(view, expectedSha256, cancellationToken);
+        }
     }
 }
