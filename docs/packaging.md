@@ -34,11 +34,11 @@ Release build 使用專案設定的 win-x64 與 self-contained 屬性，供 pack
 
 未提供 `-VpkToolPath` 時，腳本執行 `dotnet tool restore --tool-manifest .config\dotnet-tools.json`，再以 `dotnet tool run vpk` 封裝。若 cache 位於其他位置，或要改用指定的 vpk.exe，透過參數指定，不修改腳本中的機器路徑：
 
-    pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.2.0 -AppServerZipPath .\.local\cache\codex-app-server\rust-v0.162.1\codex-app-server-x86_64-pc-windows-msvc.exe.zip
+    pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.2.1 -AppServerZipPath .\.local\cache\codex-app-server\rust-v0.162.1\codex-app-server-x86_64-pc-windows-msvc.exe.zip
 
 在隔離 worktree 執行時也可將來源 cache/tool 路徑傳入：
 
-    pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.2.0 -AppServerZipPath <verified-app-server-zip> -VpkToolPath <vpk-1.2.161-executable> -NugetPackagesPath <nuget-package-cache>
+    pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.2.1 -AppServerZipPath <verified-app-server-zip> -VpkToolPath <vpk-1.2.161-executable> -NugetPackagesPath <nuget-package-cache>
 
 封裝步驟：
 
@@ -49,7 +49,7 @@ Release build 使用專案設定的 win-x64 與 self-contained 屬性，供 pack
 5. 執行 `vpk pack`（未指定 `-VpkToolPath` 時為 `dotnet tool run vpk -- pack`，`--` 讓 `dotnet tool run` 把後續參數全部轉給 vpk），明確指定 `win-x64`，不使用簽章參數。腳本將 publish 與 VPK 輸出都指向本次 stage。
 
     ```powershell
-    dotnet tool run vpk -- pack --packId ai-account-manager --packTitle 'AI 帳號管理工具' --packAuthors '雲翼' --framework webview2 --packVersion 0.2.0 --runtime win-x64 --packDir .\artifacts\.package-stage-<id>\publish --mainExe CloudyWing.AiAccountManager.Desktop.exe --outputDir .\artifacts\.package-stage-<id>\releases --instReadme .\packaging\THIRD-PARTY-NOTICES.md
+    dotnet tool run vpk -- pack --packId ai-account-manager --packTitle 'AI 帳號管理工具' --packAuthors '雲翼' --framework webview2 --packVersion 0.2.1 --runtime win-x64 --packDir .\artifacts\.package-stage-<id>\publish --mainExe CloudyWing.AiAccountManager.Desktop.exe --outputDir .\artifacts\.package-stage-<id>\releases --instReadme .\packaging\THIRD-PARTY-NOTICES.md
     ```
 6. 檢查唯一的 `*-Setup.exe`（本次產物為 `ai-account-manager-win-Setup.exe`）、至少一個 .nupkg、releases.win.json 的版本與 package 參照，並確認 package 內含 app-server binary 及 third-party notices。
 7. 產生 release-artifacts.json，記錄每個 VPK 輸出檔案的大小與 SHA-256。腳本核對 release stage 與 `outputs\.first-release-stage-<id>` 的完整檔案清單及 SHA-256，全部通過後才替換 `artifacts\releases` 與 `outputs\first-release`。若驗證失敗，既有兩個目錄維持原樣；若替換過程失敗，腳本會嘗試還原備份目錄，還原失敗時保留備份供復原。
@@ -61,25 +61,25 @@ Release build 使用專案設定的 win-x64 與 self-contained 屬性，供 pack
 完成封裝後，從 release 產物產生四份 manifest：
 
 ```powershell
-pwsh -NoProfile -File .\scripts\New-WinGetManifest.ps1 -Version 0.2.0
-winget validate --manifest .\artifacts\winget\0.2.0
+pwsh -NoProfile -File .\scripts\New-WinGetManifest.ps1 -Version 0.2.1
+winget validate --manifest .\artifacts\winget\0.2.1
 ```
 
-產生器核對 `release-artifacts.json` 與 Setup.exe 的 SHA-256，輸出至 `artifacts\winget\0.2.0`。CI 將 manifest 保存為 `winget-manifest` artifact。
+產生器核對 `release-artifacts.json` 與 Setup.exe 的 SHA-256，輸出至 `artifacts\winget\0.2.1`。CI 將 manifest 保存為 `winget-manifest` artifact。
 
 在 Windows Sandbox 中，先允許使用本機 manifest，再執行安裝、啟動、列出與解除安裝：
 
 ```powershell
 winget settings --enable LocalManifestFiles
-winget install --manifest .\artifacts\winget\0.2.0
+winget install --manifest .\artifacts\winget\0.2.1
 winget list --id CloudyWing.AiAccountManager
 winget uninstall --id CloudyWing.AiAccountManager
 ```
 
-以重裝及從 v0.1.0 升級驗證 `%LOCALAPPDATA%\AiAccountManager\data` 的資料在安裝與解除安裝後保留。Sandbox 必須能存取 manifest 指向的 Setup.exe。發行前可將 Setup.exe 放在測試 HTTP 來源的 `v0.2.0` 目錄，並用該來源重新產生 manifest：
+以重裝及從 v0.1.0 升級驗證 `%LOCALAPPDATA%\AiAccountManager\data` 的資料在安裝與解除安裝後保留。Sandbox 必須能存取 manifest 指向的 Setup.exe。發行前可將 Setup.exe 放在測試 HTTP 來源的 `v0.2.1` 目錄，並用該來源重新產生 manifest：
 
 ```powershell
-pwsh -NoProfile -File .\scripts\New-WinGetManifest.ps1 -Version 0.2.0 -BaseUrl http://<test-host>/releases/download
+pwsh -NoProfile -File .\scripts\New-WinGetManifest.ps1 -Version 0.2.1 -BaseUrl http://<test-host>/releases/download
 ```
 
 ## 更新 feed

@@ -268,6 +268,7 @@
 
     private string? handledAccountQuery;
     private readonly CancellationTokenSource pageLifetimeCancellation = new();
+    private CancellationToken pageLifetimeToken;
     private readonly Dictionary<Guid, ClaudeQuotaSnapshot.View> quotaViews = [];
     private ClaudeAccountService.PageState? pageState;
     private ClaudeDesktopSwitchService.SwitchPreview? switchPreview;
@@ -347,6 +348,7 @@
         : null;
 
     protected override async Task OnInitializedAsync() {
+        pageLifetimeToken = pageLifetimeCancellation.Token;
         Quotas.StateChanged += OnQuotaStateChanged;
         ClaudeAccountService.PageState cached = Accounts.CurrentPageState;
         if (cached.Profiles.Count > 0 || cached.CurrentIdentity.Status != ClaudeAccountService.IdentityStatus.Unknown
@@ -360,10 +362,16 @@
         }
 
         await Task.Yield();
+        if (Volatile.Read(ref disposed) != 0) {
+            return;
+        }
         await LoadPageAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender) {
+        if (Volatile.Read(ref disposed) != 0) {
+            return;
+        }
         if (!entryRefreshStarted && hasLoadedPage && pageState is not null) {
             entryRefreshStarted = true;
             _ = RefreshStaleOnEntryAsync(pageState.Profiles.ToArray());
@@ -374,7 +382,7 @@
             handledAccountQuery = requested;
             if (Guid.TryParse(requested, out Guid profileId)
                 && pageState.Profiles.Any(profile => profile.ProfileId == profileId)) {
-                await Js.InvokeVoidAsync("accountNavigation.scrollTo", pageLifetimeCancellation.Token, AccountNavigation.ElementId("claude", profileId), requested);
+                await Js.InvokeVoidAsync("accountNavigation.scrollTo", pageLifetimeToken, AccountNavigation.ElementId("claude", profileId), requested);
             }
         }
     }
@@ -399,7 +407,7 @@
             }
 
             try {
-                _ = await Quotas.RefreshAsync(profile.ProfileId, pageLifetimeCancellation.Token);
+                _ = await Quotas.RefreshAsync(profile.ProfileId, pageLifetimeToken);
             } catch (OperationCanceledException) when (pageLifetimeCancellation.IsCancellationRequested) {
                 return;
             } catch (Exception) {
@@ -427,23 +435,41 @@
 
         pageError = null;
         try {
-            pageState = await Accounts.GetPageStateAsync(pageLifetimeCancellation.Token);
+            ClaudeAccountService.PageState loadedState = await Accounts.GetPageStateAsync(pageLifetimeToken);
+            if (Volatile.Read(ref disposed) != 0) {
+                return;
+            }
+            pageState = loadedState;
             if (pageState.CleanupPending) {
                 ClaudeDesktopSwitchService.SwitchResult cleanupResult = await Switches
-                    .RecoverPendingSwitchAsync(pageLifetimeCancellation.Token);
-                pageState = await Accounts.GetPageStateAsync(pageLifetimeCancellation.Token);
+                    .RecoverPendingSwitchAsync(pageLifetimeToken);
+                if (Volatile.Read(ref disposed) != 0) {
+                    return;
+                }
+                loadedState = await Accounts.GetPageStateAsync(pageLifetimeToken);
+                if (Volatile.Read(ref disposed) != 0) {
+                    return;
+                }
+                pageState = loadedState;
                 operationMessage = cleanupResult.Message;
                 operationSeverity = SwitchResultSeverity(cleanupResult.Outcome);
             }
 
             await ReloadQuotaViewsAsync(pageState.Profiles);
+            if (Volatile.Read(ref disposed) != 0) {
+                return;
+            }
             pageState = Accounts.CurrentPageState;
             hasLoadedPage = true;
         } catch (OperationCanceledException) when (pageLifetimeCancellation.IsCancellationRequested) {
         } catch (Exception) {
-            pageError = "無法載入 Claude Desktop 帳號與身分狀態，請重新載入後再試。";
+            if (Volatile.Read(ref disposed) == 0) {
+                pageError = "無法載入 Claude Desktop 帳號與身分狀態，請重新載入後再試。";
+            }
         } finally {
-            isPageLoading = false;
+            if (Volatile.Read(ref disposed) == 0) {
+                isPageLoading = false;
+            }
         }
     }
 
@@ -465,7 +491,7 @@
         await RunPageActionAsync(PageAction.Capture, async () => {
             ClaudeAccountService.CaptureResult result = await Accounts.CaptureCurrentProfileAsync(
                 newAlias,
-                pageLifetimeCancellation.Token
+                pageLifetimeToken
             );
             bool succeeded = result.Outcome == ClaudeAccountService.CaptureOutcome.Saved;
             operationMessage = result.Message;
@@ -485,7 +511,7 @@
 
         activeQuotaProfileId = profile.ProfileId;
         await RunPageActionAsync(PageAction.RefreshQuota, async () => {
-            ClaudeQuotaSnapshot.View view = await Quotas.RefreshAsync(profile.ProfileId, pageLifetimeCancellation.Token);
+            ClaudeQuotaSnapshot.View view = await Quotas.RefreshAsync(profile.ProfileId, pageLifetimeToken);
             quotaViews[profile.ProfileId] = view;
             operationMessage = view.Status == ClaudeQuotaSnapshot.RefreshStatus.Fresh
                 ? $"{GetProfileDisplayName(profile)} 的 Claude 額度已更新。"
@@ -510,7 +536,7 @@
         switchActionBlocked = false;
         switchStatusMessage = null;
         await RunPageActionAsync(PageAction.PreviewSwitch, async () => {
-            switchPreview = await Switches.PreviewSwitchAsync(profile.ProfileId, pageLifetimeCancellation.Token);
+            switchPreview = await Switches.PreviewSwitchAsync(profile.ProfileId, pageLifetimeToken);
             isSwitchDialogVisible = true;
             if (!switchPreview.CanProceed) {
                 switchStatusMessage = switchPreview.Message ?? "目前無法安全切換此帳號。";
@@ -531,7 +557,7 @@
 
         switchStatusMessage = null;
         await RunPageActionAsync(PageAction.Switch, async () => {
-            ClaudeDesktopSwitchService.SwitchResult result = await Switches.SwitchAsync(preview, pageLifetimeCancellation.Token);
+            ClaudeDesktopSwitchService.SwitchResult result = await Switches.SwitchAsync(preview, pageLifetimeToken);
             switchStatusMessage = result.Message ?? SwitchResultMessage(result.Outcome, false);
             switchStatusSeverity = SwitchResultSeverity(result.Outcome);
             switchActionBlocked = result.Outcome != ClaudeDesktopSwitchService.SwitchOutcome.Succeeded;
@@ -553,7 +579,7 @@
 
         switchStatusMessage = null;
         await RunPageActionAsync(PageAction.Recover, async () => {
-            ClaudeDesktopSwitchService.SwitchResult result = await Switches.RecoverPendingSwitchAsync(pageLifetimeCancellation.Token);
+            ClaudeDesktopSwitchService.SwitchResult result = await Switches.RecoverPendingSwitchAsync(pageLifetimeToken);
             switchStatusMessage = result.Message ?? SwitchResultMessage(result.Outcome, true);
             switchStatusSeverity = SwitchResultSeverity(result.Outcome);
             operationMessage = switchStatusMessage;
@@ -605,7 +631,7 @@
     }
 
     private async Task ReloadPageStateAsync() {
-        pageState = await Accounts.GetPageStateAsync(pageLifetimeCancellation.Token);
+        pageState = await Accounts.GetPageStateAsync(pageLifetimeToken);
         await ReloadQuotaViewsAsync(pageState.Profiles);
     }
 
@@ -617,7 +643,7 @@
 
         foreach (ClaudeAccountProfile profile in profiles) {
             try {
-                ClaudeQuotaSnapshot.View loaded = await Quotas.GetViewAsync(profile.ProfileId, pageLifetimeCancellation.Token);
+                ClaudeQuotaSnapshot.View loaded = await Quotas.GetViewAsync(profile.ProfileId, pageLifetimeToken);
                 quotaViews[profile.ProfileId] = Quotas.GetCurrentView(profile.ProfileId) ?? loaded;
             } catch (OperationCanceledException) when (pageLifetimeCancellation.IsCancellationRequested) {
                 return;
@@ -955,7 +981,7 @@
         await RunCatalogActionAsync(() => Accounts.UpdateAliasAsync(
             profile.ProfileId,
             alias,
-            pageLifetimeCancellation.Token
+            pageLifetimeToken
         ));
     }
 
@@ -963,7 +989,7 @@
         await RunCatalogActionAsync(() => Accounts.MoveAsync(
             profile.ProfileId,
             direction,
-            pageLifetimeCancellation.Token
+            pageLifetimeToken
         ));
     }
 
@@ -994,7 +1020,7 @@
             return;
         }
 
-        await RunCatalogActionAsync(() => Accounts.RemoveAsync(profileId, pageLifetimeCancellation.Token));
+        await RunCatalogActionAsync(() => Accounts.RemoveAsync(profileId, pageLifetimeToken));
         removingProfile = null;
     }
 

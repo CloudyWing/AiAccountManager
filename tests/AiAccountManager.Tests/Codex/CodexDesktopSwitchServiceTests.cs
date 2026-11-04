@@ -14,6 +14,22 @@ public sealed class CodexDesktopSwitchServiceTests {
 
     internal static CodexDesktopSwitchService CreateRenderingService() => new Fixture(CodexDesktopProcessStatus.NotRunning).Service;
 
+    internal static CodexDesktopSwitchService CreateBlockingRenderingService(
+        TaskCompletionSource<bool> started, TaskCompletionSource<bool> release
+    ) {
+        FakeAccountCatalogRepository catalog = new() {
+            BeforeLoadAsync = async _ => {
+                started.TrySetResult(true);
+                await release.Task;
+            }
+        };
+        return new CodexDesktopSwitchService(
+            catalog, new FakeSnapshots(), new FakeAuthStore(),
+            new FakeProcessController { Status = CodexDesktopProcessStatus.NotRunning },
+            new FakeFingerprinter(), new FakeClock()
+        );
+    }
+
     [Test]
     public async Task SwitchAsync_RunningDesktop_SavesSourceWritesTargetAndRelaunches() {
         Fixture fixture = new(CodexDesktopProcessStatus.Running);
