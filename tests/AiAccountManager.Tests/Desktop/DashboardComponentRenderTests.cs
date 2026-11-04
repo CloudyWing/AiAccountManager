@@ -40,7 +40,7 @@ public sealed class DashboardComponentRenderTests {
         RecordingNotificationSink sink = new();
 
         Assert.That(snapshot, Is.Not.Null);
-        await new LowQuotaNotificationEvaluator(sink, new MemoryNotificationStore()).EvaluateAsync(snapshot!, true, 20, CancellationToken.None);
+        await new LowQuotaNotificationEvaluator(sink, new MemoryNotificationStore()).EvaluateAsync([snapshot!], true, 20, CancellationToken.None);
 
         Assert.That(snapshot!.AccountId, Is.EqualTo(fixture.CodexProfile.AccountId));
         Assert.That(snapshot.Recommendation, Is.Null);
@@ -62,7 +62,7 @@ public sealed class DashboardComponentRenderTests {
         RecordingNotificationSink sink = new();
 
         Assert.That(snapshot, Is.Not.Null);
-        await new LowQuotaNotificationEvaluator(sink, new MemoryNotificationStore()).EvaluateAsync(snapshot!, true, 20, CancellationToken.None);
+        await new LowQuotaNotificationEvaluator(sink, new MemoryNotificationStore()).EvaluateAsync([snapshot!], true, 20, CancellationToken.None);
 
         Assert.That(snapshot!.AccountId, Is.EqualTo(fixture.ClaudeProfile.ProfileId));
         Assert.That(snapshot.Recommendation, Is.Null);
@@ -83,7 +83,7 @@ public sealed class DashboardComponentRenderTests {
         RecordingNotificationSink sink = new();
 
         Assert.That(snapshot, Is.Not.Null);
-        await new LowQuotaNotificationEvaluator(sink, new MemoryNotificationStore()).EvaluateAsync(snapshot!, true, 20, CancellationToken.None);
+        await new LowQuotaNotificationEvaluator(sink, new MemoryNotificationStore()).EvaluateAsync([snapshot!], true, 20, CancellationToken.None);
 
         Assert.That(snapshot!.AccountId, Is.EqualTo(fixture.CodexProfile.AccountId));
         Assert.That(sink.Messages, Is.Empty);

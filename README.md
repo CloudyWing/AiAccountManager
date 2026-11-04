@@ -21,18 +21,26 @@ Windows x64 桌面應用程式，以 WPF 承載 Blazor Hybrid 與 MudBlazor。�
 - Claude 切換帳號時，將來源帳號的 Code Session 索引覆蓋到目標帳號；對話 transcript 為同機共用檔案，不複製或改寫。
 - 顯示 Claude 與 Codex 各帳號的額度、重置時間及最後成功更新時間；無成功資料時顯示未知，不填入 0%。
 - 支援手動刷新及 1、5、15、30 分鐘排程，錯誤會保留最後一份完整快照並依退避時間重試。
+- 額度偏低時發出系統匣通知，同一個額度視窗以分鐘精度去重，每輪只發一則。
+- 重複啟動時喚醒既有視窗，不建立第二份背景服務；既有程序無回應時提示使用者。
 - 設定保存於目前 Windows 使用者的本機資料目錄；主題可選跟隨系統、淺色或深色。
 - 使用者提供 HTTPS Velopack feed 後可檢查、下載與套用更新；更新套用會等待帳號操作結束。
 
 ## 技術與需求
 
-- Windows x64、.NET SDK 10.0.402；global.json 固定 SDK 版本。
+- Windows x64、.NET SDK 10.0.403；global.json 固定 SDK 版本。
 - WPF + Microsoft.NET.Sdk.Razor Blazor Hybrid、WebView2 Evergreen Runtime、MudBlazor。
 - Codex app-server rust-v0.162.1，封裝與執行前都核對官方 release binary hash。
 - Velopack 1.2.161；NuGet 套件版本集中於 Directory.Packages.props。
 - NUnit 5 測試專案。
 
-首次啟動需安裝 Microsoft Edge WebView2 Evergreen Runtime。產品使用目前 Windows 使用者的 DPAPI 保護本機 identity key；Codex OAuth token 由隔離 profile 的 Codex app-server/keyring 管理，不寫入產品 JSON 檔。
+安裝器會處理 Microsoft Edge WebView2 Evergreen Runtime，程式啟動時仍會檢查 Runtime。產品使用目前 Windows 使用者的 DPAPI 保護本機 identity key；Codex OAuth token 由隔離 profile 的 Codex app-server/keyring 管理，不寫入產品 JSON 檔。
+
+## 安裝
+
+從 [GitHub Releases](https://github.com/CloudyWing/AiAccountManager/releases/latest) 下載 `ai-account-manager-win-Setup.exe` 執行即可。安裝目錄為 `%LOCALAPPDATA%\ai-account-manager\current`，使用者資料獨立保存於 `%LOCALAPPDATA%\AiAccountManager\data`，解除安裝與升級都不影響該資料目錄。
+
+本專案提供 WinGet manifest，但未提交至 `microsoft/winget-pkgs`，因此 `winget install CloudyWing.AiAccountManager` 不會找到套件。需要以 WinGet 安裝時，請自行產生 manifest 後指定本機路徑，步驟見 [docs/packaging.md](docs/packaging.md)。
 
 ## 開發
 
@@ -66,12 +74,12 @@ Codex Desktop 的 `%USERPROFILE%\.codex\auth.json` 只在使用者保存登入�
 package-windows.ps1 需要本機的 app-server ZIP cache 與 Velopack CLI。Velopack CLI 以 dotnet local tool 宣告於 .config\dotnet-tools.json，腳本會先執行 `dotnet tool restore` 再呼叫 `dotnet tool run vpk`。app-server ZIP 預設讀取 repository .local 目錄，也可提供可攜參數：
 
 ```powershell
-pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.1.0 -AppServerZipPath .\.local\cache\codex-app-server\rust-v0.162.1\codex-app-server-x86_64-pc-windows-msvc.exe.zip
+pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.2.0 -AppServerZipPath .\.local\cache\codex-app-server\rust-v0.162.1\codex-app-server-x86_64-pc-windows-msvc.exe.zip
 ```
 
 需要改用其他位置的 vpk.exe 時，以 `-VpkToolPath` 指定。
 
-輸出包含 artifacts\Setup\Setup.exe、Velopack .nupkg 與 releases.win.json；已核對的 package、第三方 notices 與 SHA-256 manifest 另複製至 artifacts\releases\<version> 和 outputs\first-release。封裝腳本不執行安裝器，也不發布更新 feed。
+輸出包含 `artifacts\releases\ai-account-manager-win-Setup.exe`、Velopack .nupkg、releases.win.json、第三方 notices 與 SHA-256 manifest。驗證通過後會替換 `artifacts\releases` 與 `outputs\first-release`，不使用版本子目錄。封裝腳本不執行安裝器，也不發布更新 feed。
 
 ## 授權
 

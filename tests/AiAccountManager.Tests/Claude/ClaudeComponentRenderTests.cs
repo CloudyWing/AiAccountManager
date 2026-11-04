@@ -252,6 +252,37 @@ public sealed class ClaudeComponentRenderTests {
     }
 
     [Test]
+    public async Task ClaudePage_ShowsRefreshingState_WhileStateLoadIsPending() {
+        FakeClaudeAccountRepository repository = new() {
+            Profiles = [CreateProfile("Alpha", "account-alpha", "organization-alpha")]
+        };
+        FakeInstallationLocator installationLocator = new();
+        await using ServiceProvider services = CreatePageServices(repository, installationLocator: installationLocator);
+        ClaudeAccountService accounts = services.GetRequiredService<ClaudeAccountService>();
+        await accounts.GetPageStateAsync(CancellationToken.None);
+        TaskCompletionSource<bool> observeRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        installationLocator.ObserveRelease = observeRelease;
+        await using HtmlRenderer renderer = new(services, services.GetRequiredService<ILoggerFactory>());
+
+        await renderer.Dispatcher.InvokeAsync(() => renderer.RenderComponentAsync<MudThemeProvider>());
+        await renderer.Dispatcher.InvokeAsync(() => renderer.RenderComponentAsync<MudPopoverProvider>());
+        await renderer.Dispatcher.InvokeAsync(() => renderer.RenderComponentAsync<MudDialogProvider>());
+        await renderer.Dispatcher.InvokeAsync(() => renderer.RenderComponentAsync<MudSnackbarProvider>());
+        HtmlRootComponent root = await renderer.Dispatcher.InvokeAsync(() => renderer.BeginRenderingComponent<ClaudePage>());
+        string loading = WebUtility.HtmlDecode(await renderer.Dispatcher.InvokeAsync(root.ToHtmlString));
+        observeRelease.TrySetResult(true);
+        await root.QuiescenceTask.WaitAsync(TimeSpan.FromSeconds(5));
+        string loaded = WebUtility.HtmlDecode(await renderer.Dispatcher.InvokeAsync(root.ToHtmlString));
+
+        Assert.That(loading, Does.Contain("Alpha"));
+        Assert.That(loading, Does.Contain("正在讀取最新 Claude Desktop 狀態"));
+        Assert.That(loading, Does.Contain("disabled"));
+        Assert.That(loaded, Does.Not.Contain("正在讀取最新 Claude Desktop 狀態"));
+        Assert.That(loaded.Split("disabled", StringSplitOptions.None).Length,
+            Is.LessThan(loading.Split("disabled", StringSplitOptions.None).Length));
+    }
+
+    [Test]
     public async Task ClaudePage_StaleOnEntry_RefreshesOnlyExpiredAfterRendering() {
         ClaudeAccountProfile stale = CreateProfile("Alpha", "account-alpha", "organization-alpha");
         ClaudeAccountProfile fresh = CreateProfile("Beta", "account-beta", "organization-beta");
@@ -719,10 +750,11 @@ public sealed class ClaudeComponentRenderTests {
         FakeClaudeAccountRepository accountRepository,
         bool throwOnCleanup = false,
         IClaudeDesktopProcessController.ProcessStatus processStatus = IClaudeDesktopProcessController.ProcessStatus.NotRunning,
-        FakeQuotaRepository? quotaRepository = null
+        FakeQuotaRepository? quotaRepository = null,
+        FakeInstallationLocator? installationLocator = null
     ) {
         TestClock clock = new();
-        FakeInstallationLocator installationLocator = new();
+        installationLocator ??= new();
         FakeDesktopProfileStore profileStore = new();
         FakeProcessController processController = new(processStatus);
         FakeOAuthClient oauthClient = new();
@@ -938,14 +970,23 @@ public sealed class ClaudeComponentRenderTests {
             ));
         }
 
-        public Task<IClaudeDesktopInstallationLocator.ObservationResult> ObserveRunningAsync(CancellationToken cancellationToken) {
+        public TaskCompletionSource<bool> ObserveStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool>? ObserveRelease { get; set; }
+
+        public async Task<IClaudeDesktopInstallationLocator.ObservationResult> ObserveRunningAsync(CancellationToken cancellationToken) {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(new IClaudeDesktopInstallationLocator.ObservationResult(
+            ObserveStarted.TrySetResult(true);
+            if (ObserveRelease is not null) {
+                await ObserveRelease.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            return new IClaudeDesktopInstallationLocator.ObservationResult(
                 IClaudeDesktopInstallationLocator.LocateStatus.Found,
                 Installation.Observation,
                 null,
                 Installation
-            ));
+            );
         }
 
         public Task<IClaudeDesktopInstallationLocator.LocateResult> ResolveObservationAfterStopAsync(

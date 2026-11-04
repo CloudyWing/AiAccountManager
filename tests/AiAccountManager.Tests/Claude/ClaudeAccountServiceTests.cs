@@ -505,6 +505,37 @@ public sealed class ClaudeAccountServiceTests {
         Assert.That(state.CurrentIdentity.OrganizationUuid, Is.Null);
     }
 
+    [Test]
+    public async Task GetPageStateAsync_WhenObservableStateIsUnchanged_DoesNotRaiseStateChanged() {
+        ClaudeAccountProfile profile = ClaudeTestData.CreateProfile(Guid.NewGuid(), "account-a", "org-a");
+        ClaudeTestAccountRepository repository = new(profile);
+        ClaudeAccountService service = CreateService(repository, new(), new(), new(), new());
+        int stateChangedCount = 0;
+        service.StateChanged += (_, _) => stateChangedCount++;
+        await service.GetPageStateAsync(CancellationToken.None);
+        int countAfterFirstRead = stateChangedCount;
+
+        await service.GetPageStateAsync(CancellationToken.None);
+
+        Assert.That(stateChangedCount, Is.EqualTo(countAfterFirstRead));
+    }
+
+    [Test]
+    public async Task GetPageStateAsync_WhenObservableStateChanges_RaisesStateChanged() {
+        ClaudeAccountProfile profile = ClaudeTestData.CreateProfile(Guid.NewGuid(), "account-a", "org-a", alias: "before");
+        ClaudeTestAccountRepository repository = new(profile);
+        ClaudeAccountService service = CreateService(repository, new(), new(), new(), new());
+        int stateChangedCount = 0;
+        service.StateChanged += (_, _) => stateChangedCount++;
+        await service.GetPageStateAsync(CancellationToken.None);
+        int countAfterFirstRead = stateChangedCount;
+        repository.Profiles[0] = profile with { Alias = "after" };
+
+        await service.GetPageStateAsync(CancellationToken.None);
+
+        Assert.That(stateChangedCount, Is.EqualTo(countAfterFirstRead + 1));
+    }
+
     [TestCase(IClaudeDesktopProcessController.ProcessStatus.Running)]
     [TestCase(IClaudeDesktopProcessController.ProcessStatus.Unknown)]
     public async Task CaptureCurrentProfileAsync_RequiresStoppedDesktopBeforeSnapshotRead(

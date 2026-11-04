@@ -85,7 +85,7 @@ public sealed class ClaudeAccountService {
             .ConfigureAwait(false);
 
         PageState pageState = await LoadPageStateCoreAsync(lease.CancellationToken).ConfigureAwait(false);
-        SetPageState(pageState);
+        PublishReadPageState(pageState);
         return pageState;
     }
 
@@ -715,6 +715,27 @@ public sealed class ClaudeAccountService {
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void PublishReadPageState(PageState pageState) {
+        bool changed;
+        lock (stateLock) {
+            changed = !HasSameObservableState(currentPageState, pageState);
+            currentPageState = pageState;
+        }
+
+        // 讀取路徑只在可觀察狀態改變時通知。無條件通知會觸發下一次讀取，形成自我餵食迴圈。
+        if (changed) {
+            StateChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private static bool HasSameObservableState(PageState left, PageState right) {
+        // 讀取時間與驗證時間每次讀取都會更新，不代表狀態改變。
+        return left.ProcessStatus == right.ProcessStatus
+            && left.PendingTransaction == right.PendingTransaction
+            && left.Profiles.SequenceEqual(right.Profiles)
+            && (left.CurrentIdentity with { VerifiedAtUtc = null }) == (right.CurrentIdentity with { VerifiedAtUtc = null });
     }
 
     private static bool SameIdentity(ClaudeAccountProfile profile, string accountUuid, string organizationUuid) {

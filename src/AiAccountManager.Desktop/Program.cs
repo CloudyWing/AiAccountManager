@@ -19,22 +19,37 @@ using Velopack;
 namespace CloudyWing.AiAccountManager.Desktop;
 
 public static class Program {
+    private static readonly TimeSpan TotalTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan AttemptTimeout = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan RetryInterval = TimeSpan.FromMilliseconds(250);
+
     [STAThread]
     public static void Main(string[] args) {
         VelopackApp.Build().Run();
 
-        if (!WindowsSingleInstance.TryCreate(out WindowsSingleInstance? singleInstance)) {
+        string pipeName = ActivationPipeName.ForCurrentUser();
+        NegotiationResult result = SingleInstanceNegotiator.Negotiate(
+            () => WindowsSingleInstance.TryCreate(out WindowsSingleInstance? instance) ? instance : null,
+            timeout => ActivationPipeClient.TrySend(pipeName, timeout),
+            TotalTimeout, AttemptTimeout, RetryInterval, Thread.Sleep
+        );
+        if (result.Outcome == NegotiationOutcome.Signaled) {
+            ForegroundPermission.Allow(result.ServerProcessId);
+            return;
+        }
+        if (result.Outcome == NegotiationOutcome.TimedOut) {
+            MessageBox.Show($"{AppIdentity.DisplayName}已在執行，但沒有回應。請稍候再試，或從工作管理員結束既有程序後重新啟動。", AppIdentity.DisplayName, MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
-        using (singleInstance) {
+        using (result.Instance) {
             StartupArguments startupArguments;
             try {
                 startupArguments = StartupArguments.Parse(args);
             } catch (ArgumentException) {
                 MessageBox.Show(
                     "診斷啟動參數必須同時提供 --data-root 與 --startup-render-probe。",
-                    "AI 帳號管理工具",
+                    AppIdentity.DisplayName,
                     MessageBoxButton.OK,
                     MessageBoxImage.Error
                 );
@@ -42,6 +57,8 @@ public static class Program {
             }
 
             startupArguments.RenderProbe.RecordEvent("program.arguments.parsed", "success");
+            ActivationRelay relay = new();
+            using ActivationPipeServer? server = TryStartActivationServer(pipeName, relay, startupArguments.RenderProbe);
 
             IHost host;
             try {
@@ -96,7 +113,7 @@ public static class Program {
             }
 
             using (host) {
-                App application = new(host, startupArguments.WebViewDataDirectory, args.Contains("--start-minimized", StringComparer.Ordinal));
+                App application = new(host, startupArguments.WebViewDataDirectory, args.Contains("--start-minimized", StringComparer.Ordinal), relay);
                 startupArguments.RenderProbe.RecordEvent("application.run.started");
                 try {
                     application.Run();
@@ -106,6 +123,19 @@ public static class Program {
                     throw;
                 }
             }
+        }
+    }
+
+    private static ActivationPipeServer? TryStartActivationServer(string pipeName, ActivationRelay relay, StartupRenderProbe probe) {
+        ActivationPipeServer? server = null;
+        try {
+            server = new ActivationPipeServer(pipeName, relay.Request);
+            server.Start();
+            return server;
+        } catch (Exception exception) {
+            server?.Dispose();
+            probe.RecordEvent("activation.server.failed", "failure", exception: exception);
+            return null;
         }
     }
 

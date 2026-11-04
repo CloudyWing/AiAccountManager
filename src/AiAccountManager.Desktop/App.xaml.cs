@@ -12,6 +12,7 @@ public partial class App : System.Windows.Application {
     private readonly IHost? host;
     private readonly string? webViewDataDirectory;
     private readonly bool startMinimized;
+    private readonly ActivationRelay? activationRelay;
     private ITrayService? tray;
     private SettingsService? settings;
     private INotificationSink? notifications;
@@ -21,11 +22,12 @@ public partial class App : System.Windows.Application {
         InitializeComponent();
     }
 
-    public App(IHost host, string webViewDataDirectory, bool startMinimized = false) {
+    public App(IHost host, string webViewDataDirectory, bool startMinimized = false, ActivationRelay? activationRelay = null) {
         this.host = host ?? throw new ArgumentNullException(nameof(host));
         ArgumentException.ThrowIfNullOrWhiteSpace(webViewDataDirectory);
         this.webViewDataDirectory = Path.GetFullPath(webViewDataDirectory);
         this.startMinimized = startMinimized;
+        this.activationRelay = activationRelay;
         InitializeComponent();
     }
 
@@ -71,12 +73,13 @@ public partial class App : System.Windows.Application {
             notifications.Activated += OnNotificationActivated;
             settings.StateChanged += OnSettingsChanged;
             trayLifecycle.Start(startMinimized, mainWindow.Show);
+            activationRelay?.Attach(OnActivationRequested);
             try {
                 UpdateTrayVisibility();
                 applicationHost.Services.GetRequiredService<QuotaNotificationCoordinator>().RequestEvaluation();
             } catch (Exception) {
                 mainWindow.Show();
-                MessageBox.Show(mainWindow, "無法顯示系統匣圖示，視窗仍保持開啟。", "AI 帳號管理工具", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(mainWindow, "無法顯示系統匣圖示，視窗仍保持開啟。", AppIdentity.DisplayName, MessageBoxButton.OK, MessageBoxImage.Error);
             }
             renderProbe?.RecordEvent("main-window.show.completed", "success");
         } catch (OperationCanceledException exception) {
@@ -91,6 +94,7 @@ public partial class App : System.Windows.Application {
     }
 
     protected override void OnExit(ExitEventArgs e) {
+        activationRelay?.Detach();
         StartupRenderProbe? renderProbe = host?.Services.GetService<StartupRenderProbe>();
         renderProbe?.RecordEvent("application.exit.entered");
         if (settings is not null) {
@@ -102,6 +106,15 @@ public partial class App : System.Windows.Application {
         }
         base.OnExit(e);
         renderProbe?.RecordEvent("application.exit.completed");
+    }
+
+    private void OnActivationRequested() {
+        _ = Dispatcher.BeginInvoke(new Action(() => {
+            OnTrayOpen(this, EventArgs.Empty);
+            if (MainWindow is not null) {
+                WindowForeground.Bring(MainWindow);
+            }
+        }));
     }
 
     private void OnTrayOpen(object? sender, EventArgs e) {
@@ -127,7 +140,7 @@ public partial class App : System.Windows.Application {
                     await window.NavigateToProviderAsync(provider);
                 }
             } catch (Exception) {
-                MessageBox.Show("無法開啟通知對應的帳號管理頁。", "AI 帳號管理工具", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show("無法開啟通知對應的帳號管理頁。", AppIdentity.DisplayName, MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }));
     }
@@ -138,7 +151,7 @@ public partial class App : System.Windows.Application {
                 UpdateTrayVisibility();
             } catch (Exception) {
                 MainWindow?.Show();
-                MessageBox.Show(MainWindow, "無法顯示系統匣圖示，視窗仍保持開啟。", "AI 帳號管理工具", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(MainWindow, "無法顯示系統匣圖示，視窗仍保持開啟。", AppIdentity.DisplayName, MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }));
     }
@@ -178,7 +191,7 @@ public partial class App : System.Windows.Application {
     private static void ShowStartupFailure() {
         MessageBox.Show(
             "無法啟動桌面畫面。若此電腦尚未安裝 Microsoft Edge WebView2 Evergreen Runtime，請依官方安裝指引完成安裝後重試。",
-            "AI 帳號管理工具",
+            AppIdentity.DisplayName,
             MessageBoxButton.OK,
             MessageBoxImage.Error
         );
