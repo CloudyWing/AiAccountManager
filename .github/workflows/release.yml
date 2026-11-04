@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -19,17 +19,17 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
       - name: Prepare build inputs
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}".TrimStart('v')
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
           $nugetPackages = Join-Path $env:RUNNER_TEMP 'nuget-packages'
           $appServerZip = Join-Path $env:RUNNER_TEMP 'codex-app-server-x86_64-pc-windows-msvc.exe.zip'
           Invoke-WebRequest -Uri $env:CODEX_APP_SERVER_URL -OutFile $appServerZip
@@ -41,7 +41,7 @@ jobs:
         run: dotnet restore .\AiAccountManager.slnx
 
       - name: Build
-        run: dotnet build .\AiAccountManager.slnx -c Release --no-restore -p:Version=${{ env.APP_VERSION }} -p:CodexAppServerZipPath=${{ env.CODEX_APP_SERVER_ZIP }}
+        run: dotnet build .\AiAccountManager.slnx -c Release --no-restore "-p:Version=$env:APP_VERSION" "-p:CodexAppServerZipPath=$env:CODEX_APP_SERVER_ZIP"
 
       - name: Test
         run: dotnet test .\AiAccountManager.slnx -c Release --no-build --verbosity minimal
@@ -65,36 +65,22 @@ jobs:
           }
 
       - name: Upload WinGet manifest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: winget-manifest
           path: artifacts/winget/*
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: velopack
           path: artifacts/releases/*
 
+  # 上傳 velopack artifact 為附件；gh 會先建立草稿，附件上傳完成後才公開
   create-release:
     needs: build
-    uses: CloudyWing/devops-templates/.github/workflows/reusable-create-release.yml@main
-
-  upload-release-assets:
-    needs: create-release
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: velopack
-          path: artifacts/velopack
-
-      - name: Upload release assets
-        run: gh release upload ${{ github.ref_name }} artifacts/velopack/*
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      contents: write
+    uses: CloudyWing/devops-templates/.github/workflows/reusable-create-release.yml@v1
+    with:
+      artifact-name: velopack
