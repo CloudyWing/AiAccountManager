@@ -67,6 +67,8 @@ winget validate --manifest .\artifacts\winget\0.2.1
 
 產生器核對 `release-artifacts.json` 與 Setup.exe 的 SHA-256，輸出至 `artifacts\winget\0.2.1`。CI 將 manifest 保存為 `winget-manifest` artifact。
 
+推送正式版 tag 時，release workflow 的 `winget-submit` job 在 GitHub Release 公開後，呼叫 `CloudyWing/devops-templates` 的 `reusable-winget-submit.yml@v1`，將該 artifact 以 PR 提交至 `microsoft/winget-pkgs`。版號含 `-` 的預發布版本，以及 winget-pkgs 已有同版本 open PR 時會跳過。提交使用 repo secret `WINGET_TOKEN`，值為具 `public_repo` 權限的 classic PAT。
+
 在 Windows Sandbox 中，先允許使用本機 manifest，再執行安裝、啟動、列出與解除安裝：
 
 ```powershell

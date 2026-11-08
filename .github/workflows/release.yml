@@ -85,3 +85,13 @@ jobs:
     uses: CloudyWing/devops-templates/.github/workflows/reusable-create-release.yml@v1
     with:
       artifact-name: velopack
+
+  # Release 公開後，將 winget-manifest artifact 以 PR 提交至 microsoft/winget-pkgs；版號含 - 的預發布版本會跳過
+  winget-submit:
+    needs: create-release
+    uses: CloudyWing/devops-templates/.github/workflows/reusable-winget-submit.yml@v1
+    with:
+      manifest-artifact-name: winget-manifest
+      package-identifier: CloudyWing.AiAccountManager
+    secrets:
+      winget-token: ${{ secrets.WINGET_TOKEN }}

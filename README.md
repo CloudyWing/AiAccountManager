@@ -40,7 +40,13 @@ Windows x64 桌面應用程式，以 WPF 承載 Blazor Hybrid 與 MudBlazor。�
 
 從 [GitHub Releases](https://github.com/CloudyWing/AiAccountManager/releases/latest) 下載 `ai-account-manager-win-Setup.exe` 執行即可。安裝目錄為 `%LOCALAPPDATA%\ai-account-manager\current`，使用者資料獨立保存於 `%LOCALAPPDATA%\AiAccountManager\data`，解除安裝與升級都不影響該資料目錄。
 
-本專案提供 WinGet manifest，但未提交至 `microsoft/winget-pkgs`，因此 `winget install CloudyWing.AiAccountManager` 不會找到套件。需要以 WinGet 安裝時，請自行產生 manifest 後指定本機路徑，步驟見 [docs/packaging.md](docs/packaging.md)。
+也可以用 WinGet 安裝：
+
+```powershell
+winget install CloudyWing.AiAccountManager
+```
+
+每次發佈正式版時，release workflow 會自動把 manifest 以 PR 提交至 `microsoft/winget-pkgs`。PR 經 winget-pkgs 審核合併後，該版本才能用上述命令安裝；審核期間請改用 GitHub Releases 的安裝檔。以本機 manifest 安裝的步驟見 [docs/packaging.md](docs/packaging.md)。
 
 ## 開發
 
