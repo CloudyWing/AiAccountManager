@@ -1,3 +1,4 @@
+using AngleSharp.Dom;
 using Bunit;
 using NUnit.Framework;
 using CloudyWing.AiAccountManager.Application.Accounts;
@@ -212,6 +213,17 @@ public sealed class CodexAccountCardTests : ComponentTestBase {
         return new QuotaSnapshotView(Account.AccountId, record, QuotaDisplayStatus.Fresh, false, null);
     }
 
+    private static QuotaSnapshotView CreateViewWithCredits(ResetCreditSummary credits) {
+        QuotaSuccessfulSnapshot success = new(
+            DateTimeOffset.UtcNow.AddMinutes(-1),
+            new QuotaWindow(300, 70, DateTimeOffset.UtcNow.AddHours(2)),
+            new QuotaWindow(10080, 40, DateTimeOffset.UtcNow.AddDays(3)),
+            credits
+        );
+        QuotaSnapshotRecord record = new(Account.AccountId, Account.IdentityFingerprint, Account.ProfileRevision, success, null);
+        return new QuotaSnapshotView(Account.AccountId, record, QuotaDisplayStatus.Fresh, false, null);
+    }
+
     private IRenderedComponent<CodexAccountCard> RenderCard(
         CodexAccountProfile account,
         Action<ComponentParameterCollectionBuilder<CodexAccountCard>>? configure = null
@@ -219,6 +231,76 @@ public sealed class CodexAccountCardTests : ComponentTestBase {
         return Context.Render<CodexAccountCard>(parameters => {
             parameters.Add(p => p.Account, account);
             configure?.Invoke(parameters);
+        });
+    }
+
+    [Test]
+    public void ResetCreditDetails_RendersCollapsibleSummaryBeforeUseButton() {
+        IRenderedComponent<CodexAccountCard> cut = RenderCard(Account, parameters => parameters
+            .Add(p => p.Quota, CreateViewWithCredits(new ResetCreditSummary(1, []))));
+        IElement details = cut.Find("details.reset-credit-details");
+        IElement? next = details.NextElementSibling;
+
+        Assert.Multiple(() => {
+            Assert.That(cut.FindAll("details.reset-credit-details"), Has.Count.EqualTo(1));
+            Assert.That(details.QuerySelector("summary")?.TextContent.Trim(), Is.EqualTo("重置券明細"));
+            Assert.That(next?.LocalName, Is.EqualTo("button"));
+            Assert.That(next?.TextContent.Trim(), Is.EqualTo("使用重置券"));
+        });
+    }
+
+    [Test]
+    public void ResetCreditDetails_RendersNameAndExpiryPerCredit() {
+        DateTimeOffset granted = DateTimeOffset.Parse("2026-10-01T00:00:00Z");
+        ResetCreditSummary credits = new(3, [
+            new ResetCredit("credit-1", "weekly", "active", granted, DateTimeOffset.Parse("2026-10-28T06:29:38Z"), "重置券一", null),
+            new ResetCredit("credit-2", "weekly", "active", granted, DateTimeOffset.Parse("2026-11-28T06:29:38Z"), null, null),
+            new ResetCredit("credit-3", "weekly", "active", granted, null, "重置券三", null)
+        ]);
+        IRenderedComponent<CodexAccountCard> cut = RenderCard(Account, parameters => parameters
+            .Add(p => p.Quota, CreateViewWithCredits(credits)));
+
+        Assert.Multiple(() => {
+            Assert.That(cut.FindAll(".reset-credit-item"), Has.Count.EqualTo(3));
+            Assert.That(cut.Find(".reset-credit-item:nth-child(1) .reset-credit-name").TextContent.Trim(), Is.EqualTo("重置券一"));
+            Assert.That(cut.Find(".reset-credit-item:nth-child(1) .reset-credit-expiry").TextContent.Trim(), Is.EqualTo("10/28 14:29"));
+            Assert.That(cut.Find(".reset-credit-item:nth-child(2) .reset-credit-name").TextContent.Trim(), Is.EqualTo("credit-2"));
+            Assert.That(cut.Find(".reset-credit-item:nth-child(2) .reset-credit-expiry").TextContent.Trim(), Is.EqualTo("11/28 14:29"));
+            Assert.That(cut.Find(".reset-credit-item:nth-child(3) .reset-credit-name").TextContent.Trim(), Is.EqualTo("重置券三"));
+            Assert.That(cut.Find(".reset-credit-item:nth-child(3) .reset-credit-expiry").TextContent.Trim(), Is.EqualTo("無期限"));
+        });
+    }
+
+    [Test]
+    public void ResetCreditDetails_MarksExpiringItemOnly() {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        ResetCreditSummary credits = new(2, [
+            new ResetCredit("soon", "weekly", "active", now, now.AddDays(3), "即將到期", null),
+            new ResetCredit("later", "weekly", "active", now, now.AddDays(30), "稍後到期", null)
+        ]);
+        IRenderedComponent<CodexAccountCard> cut = RenderCard(Account, parameters => parameters
+            .Add(p => p.Quota, CreateViewWithCredits(credits)));
+
+        Assert.Multiple(() => {
+            Assert.That(cut.Find(".reset-credit-item:nth-child(1)").ClassList, Does.Contain("is-expiring"));
+            Assert.That(cut.Find(".reset-credit-item:nth-child(2)").ClassList, Does.Not.Contain("is-expiring"));
+        });
+    }
+
+    [Test]
+    public void ResetCreditDetails_ShowsUnlistedRemainderAtListEnd() {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        ResetCreditSummary credits = new(3, [
+            new ResetCredit("credit-1", "weekly", "active", now, now.AddDays(30), "重置券一", null)
+        ]);
+        IRenderedComponent<CodexAccountCard> cut = RenderCard(Account, parameters => parameters
+            .Add(p => p.Quota, CreateViewWithCredits(credits)));
+        IElement last = cut.Find(".reset-credit-list li:last-child");
+
+        Assert.Multiple(() => {
+            Assert.That(last.ClassList, Does.Contain("reset-credit-more"));
+            Assert.That(last.TextContent.Trim(), Is.EqualTo("另有 2 張未列出明細"));
+            Assert.That(cut.FindAll(".reset-credit-list .mud-typography"), Is.Empty);
         });
     }
 }
