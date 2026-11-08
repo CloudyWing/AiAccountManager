@@ -2,7 +2,7 @@
   <PropertyGroup>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>0.3.0</Version>
+    <Version>0.3.1</Version>
     <Product>AI 帳號管理工具</Product>
     <Company>雲翼</Company>
     <Deterministic>true</Deterministic>
