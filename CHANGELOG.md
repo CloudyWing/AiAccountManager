@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.3.0 (2026-11-09)
+
+### New Features
+
+- 設定頁的低額度通知區新增「傳送測試通知」按鈕。測試氣泡和正式通知格式相同，內容改用範例值並標示為測試。低額度通知關閉時仍可傳送，點擊氣泡不切換頁面，也不影響正式通知的去重紀錄。
+- 發佈正式版時，release workflow 會自動把 WinGet manifest 以 PR 提交至 `microsoft/winget-pkgs`，版號含 `-` 的預發布版本不提交。PR 審核合併後，可用 `winget install CloudyWing.AiAccountManager` 安裝。
+
+### Changes
+
+- 6 個 Dialog 的標題移到標題區，下方加上分隔線，標題與內容的間距加大，不會再被看成內容中的章節標題。
+- Codex 帳號卡的重置券明細改為縮排清單：名稱靠左、到期日靠右，即將到期的項目以警示色標示，明細與「使用重置券」按鈕之間加大間距。明細標題改用 chevron 圖示，滑鼠點擊後不再出現白色外框，鍵盤操作時仍有 focus 指示。
+
+### Bug Fixes
+
+- 修正解除安裝後安裝目錄殘留，導致無法重新安裝的問題。原因是從本工具開啟的 Claude Desktop 與瀏覽器會繼承安裝目錄作為工作目錄，使安裝目錄被鎖住。現在程式啟動時若工作目錄位於安裝目錄內，會改用使用者設定檔目錄。
+- 修正帳號卡展開按鈕的 `aria-expanded` 在收合時缺漏、展開時為空值的問題。
+
+### Build & CI
+
+- 新增 bUnit 元件測試與 FlaUI UI 測試專案。
+- 新增以 `CloudyWing/devops-templates` 執行的 CI，並排除需要互動式桌面的 UI 測試。
+- release workflow 改由共用流程建立 GitHub Release 並上傳附件。
+- 新增 Dependabot 設定。
+
+### Documentation
+
+- README 與 docs/packaging.md 補充 WinGet 安裝與自動提交說明，封裝範例版號更新為 0.3.0。
+- docs/packaging.md 新增解除安裝後重新安裝仍顯示「已安裝」的疑難排解。
+
 ## v0.2.1 (2026-11-05)
 
 ### Bug Fixes
