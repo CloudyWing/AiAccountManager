@@ -5,6 +5,8 @@
     <Project Path="src/AiAccountManager.Windows/AiAccountManager.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/AiAccountManager.Components.Tests/AiAccountManager.Components.Tests.csproj" />
     <Project Path="tests/AiAccountManager.Tests/AiAccountManager.Tests.csproj" />
+    <Project Path="tests/AiAccountManager.UiTests/AiAccountManager.UiTests.csproj" />
   </Folder>
 </Solution>

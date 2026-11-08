@@ -36,7 +36,7 @@
                                OnClick="RefreshAsync" />
                 <MudIconButton Icon="@ExpandIcon"
                                Color="Color.Default"
-                               aria-expanded="@expanded"
+                               aria-expanded="@(expanded ? "true" : "false")"
                                aria-label="@(expanded ? $"收合 {DisplayName} 詳細資料" : $"展開 {DisplayName} 詳細資料")"
                                OnClick="ToggleExpanded" />
             </div>
@@ -54,16 +54,20 @@
             <MudText Typo="Typo.caption" Class="mud-text-secondary">@QuotaUpdatedAtFormatter.Format(success.RetrievedAtUtc, DateTimeOffset.UtcNow)</MudText>
             @if (success.ResetCredits is ResetCreditSummary credits) {
                 <MudText Typo="Typo.body2">重置券 @credits.AvailableCount 張・@CreditExpiry(credits)</MudText>
-                <details>
+                <details class="reset-credit-details">
                     <summary>重置券明細</summary>
-                    @foreach (ResetCredit credit in credits.Credits ?? []) {
-                        <MudText Typo="Typo.body2" Color="@(IsExpiring(credit.ExpiresAtUtc) ? Color.Warning : Color.Default)">
-                            @(credit.Title ?? credit.Id)・@(credit.ExpiresAtUtc is DateTimeOffset expiry ? TaiwanTimeUtils.Format(expiry) : "無期限")
-                        </MudText>
-                    }
-                    @if (credits.AvailableCount > (credits.Credits?.Count ?? 0)) {
-                        <MudText Typo="Typo.caption">另有 @(credits.AvailableCount - (credits.Credits?.Count ?? 0)) 張未列出明細</MudText>
-                    }
+                    <ul class="reset-credit-list">
+                        @foreach (ResetCredit credit in credits.Credits ?? []) {
+                            bool expiring = IsExpiring(credit.ExpiresAtUtc);
+                            <li class="@(expiring ? "reset-credit-item is-expiring" : "reset-credit-item")">
+                                <span class="reset-credit-name">@(credit.Title ?? credit.Id)</span>
+                                <span class="reset-credit-expiry">@(credit.ExpiresAtUtc is DateTimeOffset expiry ? TaiwanTimeUtils.Format(expiry) : "無期限")</span>
+                            </li>
+                        }
+                        @if (credits.AvailableCount > (credits.Credits?.Count ?? 0)) {
+                            <li class="reset-credit-more">另有 @(credits.AvailableCount - (credits.Credits?.Count ?? 0)) 張未列出明細</li>
+                        }
+                    </ul>
                 </details>
                 <MudButton Variant="Variant.Outlined" Disabled="@(Busy || credits.AvailableCount <= 0 || CreditRefreshRequired)" OnClick="UseCreditAsync">使用重置券</MudButton>
                 @if (CreditRefreshRequired) {

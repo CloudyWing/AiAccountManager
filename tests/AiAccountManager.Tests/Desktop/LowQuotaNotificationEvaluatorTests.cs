@@ -158,6 +158,39 @@ public sealed class LowQuotaNotificationEvaluatorTests {
         Assert.That(names, Does.Not.Contain("Email"));
     }
 
+    [Test]
+    public async Task EvaluateAsync_LowQuota_SendsExactFormalTitleAndMessage() {
+        FakeSink sink = new();
+        LowQuotaNotificationEvaluator evaluator = new(sink, new FakeStore());
+        Guid id = Guid.NewGuid();
+        DateTimeOffset reset = new(2026, 11, 1, 0, 0, 0, TimeSpan.Zero);
+
+        await evaluator.EvaluateAsync([Snapshot(id, 12, reset, "備用帳號")], true, 20, CancellationToken.None);
+
+        Assert.That(sink.Messages, Has.Count.EqualTo(1));
+        NotificationRequest request = sink.Messages[0];
+        using (Assert.EnterMultipleScope()) {
+            Assert.That(request.Title, Is.EqualTo("額度偏低"));
+            Assert.That(request.Message, Is.EqualTo("Codex 5 小時額度剩 12%，建議切換至 備用帳號"));
+            Assert.That(request.Type, Is.EqualTo("low-quota"));
+            Assert.That(request.Provider, Is.EqualTo("codex"));
+            Assert.That(request.Activatable, Is.True);
+        }
+    }
+
+    [Test]
+    public async Task EvaluateAsync_LowQuotaWithoutRecommendation_SendsFractionalMessageWithoutSuffix() {
+        FakeSink sink = new();
+        LowQuotaNotificationEvaluator evaluator = new(sink, new FakeStore());
+        Guid id = Guid.NewGuid();
+        DateTimeOffset reset = new(2026, 11, 1, 0, 0, 0, TimeSpan.Zero);
+
+        await evaluator.EvaluateAsync([Snapshot(id, 12.5m, reset)], true, 20, CancellationToken.None);
+
+        Assert.That(sink.Messages, Has.Count.EqualTo(1));
+        Assert.That(sink.Messages[0].Message, Is.EqualTo("Codex 5 小時額度剩 12.5%"));
+    }
+
     private static NotificationSnapshot Snapshot(Guid id, decimal? remaining, DateTimeOffset? reset, string? recommendation = null) {
         return new("codex", id, recommendation, [new("five-hour", "5 小時", remaining, reset)]);
     }

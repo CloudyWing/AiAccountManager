@@ -56,6 +56,7 @@ public static class Program {
                 return;
             }
 
+            WorkingDirectoryPolicy.Apply();
             startupArguments.RenderProbe.RecordEvent("program.arguments.parsed", "success");
             ActivationRelay relay = new();
             using ActivationPipeServer? server = TryStartActivationServer(pipeName, relay, startupArguments.RenderProbe);
@@ -94,6 +95,7 @@ public static class Program {
                         services.AddSingleton<UpdateService>();
                         services.AddSingleton<ITrayService, WindowsTrayService>();
                         services.AddSingleton<INotificationSink, TrayNotificationSink>();
+                        services.AddSingleton<ILowQuotaTestNotificationService, LowQuotaTestNotificationService>();
                         services.AddSingleton<LowQuotaNotificationEvaluator>();
                         services.AddSingleton<QuotaNotificationCoordinator>();
                         services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<QuotaNotificationCoordinator>());

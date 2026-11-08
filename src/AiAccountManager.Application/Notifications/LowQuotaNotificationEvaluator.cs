@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace CloudyWing.AiAccountManager.Application.Notifications;
 
 /// <summary>序列化評估額度通知並記錄已送出的週期。</summary>
@@ -66,13 +64,16 @@ public sealed class LowQuotaNotificationEvaluator {
                 .FirstOrDefault();
             bool success = false;
             if (selected is not null) {
-                string provider = selected.Snapshot.Provider == "codex" ? "Codex" : "Claude";
-                string message = $"{provider} {selected.Window.Label}額度剩 {selected.Remaining.ToString("0.##", CultureInfo.InvariantCulture)}%";
-                if (!string.IsNullOrWhiteSpace(selected.Snapshot.Recommendation)) {
-                    message += $"，建議切換至 {selected.Snapshot.Recommendation}";
-                }
-                success = await sink.SendAsync(new("額度偏低", message, "low-quota", selected.Snapshot.Provider), cancellationToken)
-                    .ConfigureAwait(false);
+                string message = LowQuotaNotificationMessage.Compose(
+                    selected.Snapshot.Provider,
+                    selected.Window.Label,
+                    selected.Remaining,
+                    selected.Snapshot.Recommendation
+                );
+                success = await sink.SendAsync(
+                    new(LowQuotaNotificationMessage.Title, message, LowQuotaNotificationMessage.Type, selected.Snapshot.Provider),
+                    cancellationToken
+                ).ConfigureAwait(false);
                 if (success) {
                     sent.Add(selected.Key);
                     dirty = true;

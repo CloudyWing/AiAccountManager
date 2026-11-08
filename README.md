@@ -32,7 +32,7 @@ Windows x64 桌面應用程式，以 WPF 承載 Blazor Hybrid 與 MudBlazor。�
 - WPF + Microsoft.NET.Sdk.Razor Blazor Hybrid、WebView2 Evergreen Runtime、MudBlazor。
 - Codex app-server rust-v0.162.1，封裝與執行前都核對官方 release binary hash。
 - Velopack 1.2.161；NuGet 套件版本集中於 Directory.Packages.props。
-- NUnit 5 測試專案。
+- NUnit 5 測試專案；元件互動測試使用 bUnit，端對端 UI 測試使用 FlaUI（UIA3）。
 
 安裝器會處理 Microsoft Edge WebView2 Evergreen Runtime，程式啟動時仍會檢查 Runtime。產品使用目前 Windows 使用者的 DPAPI 保護本機 identity key；Codex OAuth token 由隔離 profile 的 Codex app-server/keyring 管理，不寫入產品 JSON 檔。
 
@@ -40,7 +40,13 @@ Windows x64 桌面應用程式，以 WPF 承載 Blazor Hybrid 與 MudBlazor。�
 
 從 [GitHub Releases](https://github.com/CloudyWing/AiAccountManager/releases/latest) 下載 `ai-account-manager-win-Setup.exe` 執行即可。安裝目錄為 `%LOCALAPPDATA%\ai-account-manager\current`，使用者資料獨立保存於 `%LOCALAPPDATA%\AiAccountManager\data`，解除安裝與升級都不影響該資料目錄。
 
-本專案提供 WinGet manifest，但未提交至 `microsoft/winget-pkgs`，因此 `winget install CloudyWing.AiAccountManager` 不會找到套件。需要以 WinGet 安裝時，請自行產生 manifest 後指定本機路徑，步驟見 [docs/packaging.md](docs/packaging.md)。
+也可以用 WinGet 安裝：
+
+```powershell
+winget install CloudyWing.AiAccountManager
+```
+
+每次發佈正式版時，release workflow 會自動把 manifest 以 PR 提交至 `microsoft/winget-pkgs`。PR 經 winget-pkgs 審核合併後，該版本才能用上述命令安裝；審核期間請改用 GitHub Releases 的安裝檔。以本機 manifest 安裝的步驟見 [docs/packaging.md](docs/packaging.md)。
 
 ## 開發
 
@@ -56,7 +62,22 @@ $env:DOTNET_NOLOGO = '1'
 dotnet restore .\AiAccountManager.slnx
 dotnet build .\AiAccountManager.slnx -c Release --no-restore
 dotnet test .\tests\AiAccountManager.Tests\AiAccountManager.Tests.csproj -c Release --no-build --no-restore
+dotnet test .\tests\AiAccountManager.Components.Tests\AiAccountManager.Components.Tests.csproj -c Release --no-build --no-restore
 ```
+
+測試專案分工：
+
+- `AiAccountManager.Tests`：Application、Windows 介面卡與頁面靜態渲染測試。
+- `AiAccountManager.Components.Tests`：以 bUnit 驗證 Razor 元件的點擊、輸入與 callback 行為。
+- `AiAccountManager.UiTests`：以 FlaUI 啟動實際的桌面程式，驗證主視窗、WebView2 內容與頁面導覽；測試分類為 `UI`。
+
+UI 測試需要互動式 Windows 桌面與 WebView2 Runtime，並會啟動與測試相同組態建置的 Desktop 執行檔。程式以 `--data-root` 指向暫存目錄，不讀寫 `%LOCALAPPDATA%\AiAccountManager\data`；但仍會讀取本機 Claude Desktop 與 Codex 的安裝與登入狀態。程式採單一執行個體，執行 UI 測試前請先結束正在執行的 AI 帳號管理工具，否則測試會略過。
+
+```powershell
+dotnet test .\tests\AiAccountManager.UiTests\AiAccountManager.UiTests.csproj -c Release --no-build --no-restore
+```
+
+若要測試其他位置的執行檔，可設定 `AIACCOUNTMANAGER_DESKTOP_EXE` 環境變數指定完整路徑。執行整個方案的測試時，可用 `--filter "TestCategory!=UI"` 排除 UI 測試。
 
 所有驗證與 packaging 命令需在 Windows 執行。細節見 [docs/packaging.md](docs/packaging.md)。
 
@@ -74,7 +95,7 @@ Codex Desktop 的 `%USERPROFILE%\.codex\auth.json` 只在使用者保存登入�
 package-windows.ps1 需要本機的 app-server ZIP cache 與 Velopack CLI。Velopack CLI 以 dotnet local tool 宣告於 .config\dotnet-tools.json，腳本會先執行 `dotnet tool restore` 再呼叫 `dotnet tool run vpk`。app-server ZIP 預設讀取 repository .local 目錄，也可提供可攜參數：
 
 ```powershell
-pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.2.1 -AppServerZipPath .\.local\cache\codex-app-server\rust-v0.162.1\codex-app-server-x86_64-pc-windows-msvc.exe.zip
+pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.3.0 -AppServerZipPath .\.local\cache\codex-app-server\rust-v0.162.1\codex-app-server-x86_64-pc-windows-msvc.exe.zip
 ```
 
 需要改用其他位置的 vpk.exe 時，以 `-VpkToolPath` 指定。

@@ -1,7 +1,7 @@
-<MudDialog Visible="@Visible" VisibleChanged="VisibleChanged" Options="@Options">
+<MudDialog Visible="@Visible" VisibleChanged="VisibleChanged" Options="@Options" TitleClass="aam-dialog-title" ContentClass="aam-dialog-content">
+    <TitleContent><MudText Typo="Typo.h6">確認使用重置券</MudText></TitleContent>
     <DialogContent>
         <MudStack Spacing="2">
-            <MudText Typo="Typo.h6">確認使用重置券</MudText>
             <MudText>5 小時：@Describe(Snapshot?.FiveHour)</MudText>
             <MudText>每週：@Describe(Snapshot?.Weekly)</MudText>
             @if (CreditId is null) {

@@ -1,7 +1,7 @@
-<MudDialog Visible="@Visible" VisibleChanged="VisibleChanged" Options="@DialogOptions" Class="claude-remove-account-dialog" ActionsClass="aam-dialog-actions">
+<MudDialog Visible="@Visible" VisibleChanged="VisibleChanged" Options="@DialogOptions" Class="claude-remove-account-dialog" ActionsClass="aam-dialog-actions" TitleClass="aam-dialog-title" ContentClass="aam-dialog-content">
+    <TitleContent><MudText Typo="Typo.h6">確認移除 Claude 帳號</MudText></TitleContent>
     <DialogContent>
         <MudStack Spacing="2">
-            <MudText Typo="Typo.h6">確認移除 Claude 帳號</MudText>
             @if (Profile is not null) {
                 <MudText Typo="Typo.subtitle1">@(string.IsNullOrWhiteSpace(Profile.Alias) ? Profile.MaskedEmail : Profile.Alias)</MudText>
                 <MudText Typo="Typo.body2" Class="mud-text-secondary">身分：@Profile.MaskedEmail</MudText>
