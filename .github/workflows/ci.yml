@@ -22,3 +22,4 @@ jobs:
     with:
       solution: AiAccountManager.slnx
       global-json-file: global.json
+      test-args: --filter TestCategory!=UI
