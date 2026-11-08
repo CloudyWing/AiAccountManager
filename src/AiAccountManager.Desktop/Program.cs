@@ -56,6 +56,7 @@ public static class Program {
                 return;
             }
 
+            WorkingDirectoryPolicy.Apply();
             startupArguments.RenderProbe.RecordEvent("program.arguments.parsed", "success");
             ActivationRelay relay = new();
             using ActivationPipeServer? server = TryStartActivationServer(pipeName, relay, startupArguments.RenderProbe);

@@ -87,3 +87,21 @@ pwsh -NoProfile -File .\scripts\New-WinGetManifest.ps1 -Version 0.2.1 -BaseUrl h
 UpdateFeedUrl 預設使用 GitHub Releases 網址 `https://github.com/CloudyWing/AiAccountManager/releases/latest/download`。使用者可在設定中指定絕對 HTTPS feed 覆寫預設網址。
 
 更新套用會暫停 quota scheduler、拒絕新的 profile/quota 工作，等待目前操作完成。等待超過 30 秒會取消套用並恢復 scheduler。產品安裝目錄為 %LOCALAPPDATA%\ai-account-manager\current；使用者資料獨立保存於 %LOCALAPPDATA%\AiAccountManager\data。
+
+## 疑難排解
+
+### 解除安裝後重新安裝顯示「已安裝」
+
+症狀：解除安裝後執行 Setup，出現「AI 帳號管理工具 已安裝」對話框；按「修復」後回報無法移除現有的應用程式目錄。
+
+Velopack Setup 只要安裝根目錄 `%LOCALAPPDATA%\ai-account-manager` 非空就判定已安裝，修復時需先將該目錄改名。解除安裝會結束安裝目錄內的程式，再排程刪除整個目錄。若有其他程式以 `%LOCALAPPDATA%\ai-account-manager\current` 作為工作目錄，檔案會被刪除，但 `current` 目錄本身無法刪除，留下空目錄。
+
+v0.3.0 以前的版本以安裝目錄作為工作目錄啟動 Claude Desktop 與瀏覽器，這些程式在解除安裝後仍持有該目錄。v0.3.0 起程式啟動時會改用使用者設定檔目錄作為工作目錄。由舊版啟動、尚未重新啟動的程式仍會持有目錄。
+
+處置步驟：
+
+1. 完全結束 Claude Desktop（含系統匣圖示）與瀏覽器。瀏覽器關閉視窗後可能仍有背景程序，需在工作管理員確認已無該瀏覽器的程序。
+2. 確認 `%LOCALAPPDATA%\ai-account-manager` 內只剩空目錄後，刪除整個 `%LOCALAPPDATA%\ai-account-manager`。若刪除仍失敗，登出 Windows 再重新登入後重試。
+3. 重新執行 Setup。
+
+使用者資料保存在 `%LOCALAPPDATA%\AiAccountManager\data`，不受上述步驟影響。
