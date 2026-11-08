@@ -48,6 +48,14 @@ public sealed class ClaudeRemoveAccountDialogTests : ComponentTestBase {
     }
 
     [Test]
+    public void Visible_PlacesTitleInTitleSlot() {
+        IRenderedComponent<MudDialogProvider> provider = RenderDialogProvider();
+        RenderDialog(Profile);
+
+        provider.WaitForAssertion(() => AssertTitleInTitleSlot(provider, "確認移除 Claude 帳號"));
+    }
+
+    [Test]
     public void Confirm_SendsProfileId() {
         List<Guid> confirmed = [];
         IRenderedComponent<MudDialogProvider> provider = RenderDialogProvider();

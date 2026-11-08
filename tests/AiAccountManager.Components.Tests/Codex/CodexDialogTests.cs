@@ -130,4 +130,50 @@ public sealed class CodexDialogTests : ComponentTestBase {
 
         Assert.That(confirmCount, Is.EqualTo(1));
     }
+
+    [Test]
+    public void SwitchDialog_PlacesTitleInTitleSlot() {
+        IRenderedComponent<MudDialogProvider> provider = RenderDialogProvider();
+        Context.Render<CodexSwitchConfirmationDialog>(parameters => parameters
+            .Add(p => p.Visible, true)
+            .Add(p => p.SourceDisplayName, "Work")
+            .Add(p => p.TargetDisplayName, "Personal"));
+
+        provider.WaitForAssertion(() => AssertTitleInTitleSlot(provider, "切換 Codex Desktop 帳號"));
+    }
+
+    [Test]
+    public void LoginDialog_PlacesTitleInTitleSlot() {
+        IRenderedComponent<MudDialogProvider> provider = RenderDialogProvider();
+        Context.Render<CodexLoginDialog>(parameters => parameters.Add(p => p.Visible, true));
+
+        provider.WaitForAssertion(() => AssertTitleInTitleSlot(provider, "連結 Codex 額度帳號"));
+    }
+
+    [Test]
+    public void ResetCreditDialog_PlacesTitleInTitleSlot() {
+        IRenderedComponent<MudDialogProvider> provider = RenderDialogProvider();
+        Context.Render<ResetCreditDialog>(parameters => parameters.Add(p => p.Visible, true));
+
+        provider.WaitForAssertion(() => AssertTitleInTitleSlot(provider, "確認使用重置券"));
+    }
+
+    [Test]
+    public void RemoveDialog_PlacesTitleInTitleSlot() {
+        CodexAccountProfile account = new(
+            Guid.Parse("11111111-2222-3333-4444-555555555555"),
+            "Work",
+            "w***@example.test",
+            "fingerprint",
+            1,
+            DateTimeOffset.Parse("2026-10-01T00:00:00Z"),
+            "active"
+        );
+        IRenderedComponent<MudDialogProvider> provider = RenderDialogProvider();
+        Context.Render<CodexRemoveAccountDialog>(parameters => parameters
+            .Add(p => p.Visible, true)
+            .Add(p => p.Account, account));
+
+        provider.WaitForAssertion(() => AssertTitleInTitleSlot(provider, "確認移除 Codex 額度帳號"));
+    }
 }

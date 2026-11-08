@@ -1,3 +1,4 @@
+using AngleSharp.Dom;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
@@ -42,5 +43,20 @@ public abstract class ComponentTestBase {
     protected IRenderedComponent<MudDialogProvider> RenderDialogProvider() {
         Context.Render<MudPopoverProvider>();
         return Context.Render<MudDialogProvider>();
+    }
+
+    protected static void AssertTitleInTitleSlot(IRenderedComponent<MudDialogProvider> provider, string expectedTitle) {
+        string? titleId = provider.Find("[role='dialog']").GetAttribute("aria-labelledby");
+        Assert.That(titleId, Is.Not.Null.And.Not.Empty);
+        IElement title = provider.Find($"[id='{titleId}']");
+        IElement content = provider.Find(".aam-dialog-content");
+
+        Assert.Multiple(() => {
+            Assert.That(title.TextContent.Trim(), Is.EqualTo(expectedTitle));
+            Assert.That(title.ClassList, Does.Contain("aam-dialog-title"));
+            Assert.That(title.QuerySelectorAll("h6"), Has.Count.EqualTo(1));
+            Assert.That(content.QuerySelectorAll("h6"), Is.Empty);
+            Assert.That(content.TextContent, Does.Not.Contain(expectedTitle));
+        });
     }
 }

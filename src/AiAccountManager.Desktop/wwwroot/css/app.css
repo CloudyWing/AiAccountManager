@@ -143,6 +143,14 @@ body {
   padding-bottom: 1.5rem;
 }
 
+.mud-dialog .mud-dialog-title.aam-dialog-title {
+  border-block-end: 1px solid var(--mud-palette-divider);
+}
+
+.mud-dialog .mud-dialog-content.aam-dialog-content {
+  padding-block-start: 1rem;
+}
+
 .account-avatar {
   position: relative;
   display: inline-grid;
@@ -354,11 +362,98 @@ body {
   background-color: var(--mud-palette-background);
 }
 
-.identity-banner-details summary {
+.identity-banner-details summary,
+.reset-credit-details summary {
   display: flex;
   min-height: 44px;
   align-items: center;
   cursor: pointer;
+  color: var(--mud-palette-text-secondary);
+}
+
+.reset-credit-details summary {
+  gap: 0.5rem;
+  list-style: none;
+}
+
+.reset-credit-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.reset-credit-details summary::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-inline-end: 2px solid currentColor;
+  border-block-end: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 120ms ease-in-out;
+}
+
+.reset-credit-details[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+.reset-credit-details summary:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.reset-credit-details summary:focus-visible {
+  outline: 2px solid var(--mud-palette-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reset-credit-details summary::before {
+    transition: none;
+  }
+}
+
+.reset-credit-details[open] {
+  margin-block-end: 0.5rem;
+}
+
+.reset-credit-list {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0.25rem 0 0;
+  padding-inline-start: 1rem;
+  list-style: none;
+}
+
+.reset-credit-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--mud-palette-text-primary);
+}
+
+.reset-credit-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.reset-credit-expiry {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--mud-palette-text-secondary);
+}
+
+.reset-credit-item.is-expiring,
+.reset-credit-item.is-expiring .reset-credit-expiry {
+  color: var(--mud-palette-warning);
+}
+
+.reset-credit-more {
+  font-size: 0.75rem;
+  line-height: 1.5;
   color: var(--mud-palette-text-secondary);
 }
 
