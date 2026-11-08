@@ -36,7 +36,7 @@ public sealed class TrayNotificationSink : INotificationSink, IDisposable {
         await sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try {
             lock (sync) {
-                currentProvider = request.Provider;
+                currentProvider = request.Activatable ? request.Provider : null;
             }
             tray.ShowBalloon(request.Title, request.Message);
             return true;
