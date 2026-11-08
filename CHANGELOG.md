@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.1 (2026-11-09)
+
+### Bug Fixes
+
+- 修正 WinGet manifest 的授權網址指向不存在的 `LICENSE`，導致 winget-pkgs 的網址驗證失敗。授權網址改為 `LICENSE.md`。
+
+### Documentation
+
+- README 與 docs/packaging.md 的封裝範例版號更新為 0.3.1。
+
 ## v0.3.0 (2026-11-09)
 
 ### New Features
