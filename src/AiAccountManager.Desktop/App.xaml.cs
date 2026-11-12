@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using CloudyWing.AiAccountManager.Application.Settings;
 using CloudyWing.AiAccountManager.Application.Notifications;
@@ -40,6 +41,7 @@ public partial class App : System.Windows.Application {
             Dispatcher.ShutdownStarted += (_, _) => renderProbe.RecordEvent("dispatcher.shutdown.started");
             Dispatcher.ShutdownFinished += (_, _) => renderProbe.RecordEvent("dispatcher.shutdown.finished");
         }
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
 
         try {
             _ = CoreWebView2Environment.GetAvailableBrowserVersionString();
@@ -117,8 +119,18 @@ public partial class App : System.Windows.Application {
         }));
     }
 
+    private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e) {
+        // 只吞下 WebView2 繪圖裝置遺失後的已知例外並改為重建畫面，其餘例外維持既有處理。
+        if (!e.Handled && MainWindow is MainWindow window && window.TrySwallowRenderException(e.Exception)) {
+            e.Handled = true;
+        }
+    }
+
     private void OnTrayOpen(object? sender, EventArgs e) {
         Dispatcher.Invoke(() => {
+            if (MainWindow is MainWindow hiddenWindow && !hiddenWindow.IsVisible) {
+                hiddenWindow.RequestWebViewRecovery("tray-show");
+            }
             MainWindow?.Show();
             if (MainWindow is not null) {
                 MainWindow.WindowState = WindowState.Normal;

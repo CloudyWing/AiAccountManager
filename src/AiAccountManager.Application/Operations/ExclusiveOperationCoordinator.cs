@@ -28,6 +28,17 @@ public sealed class ExclusiveOperationCoordinator {
     private bool stopAccepting;
 
     /// <summary>
+    /// 取得目前是否有進行中的帳號或額度作業，或已保留更新套用權。
+    /// </summary>
+    public bool HasActiveOperations {
+        get {
+            lock (sync) {
+                return activeOperations > 0 || updateReserved;
+            }
+        }
+    }
+
+    /// <summary>
     /// 等待進入帳號或額度作業。
     /// </summary>
     /// <param name="cancellationToken">取消等待的權杖。</param>
