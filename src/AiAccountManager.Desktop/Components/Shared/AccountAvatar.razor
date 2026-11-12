@@ -18,17 +18,17 @@
 
 @code {
     [Parameter, EditorRequired]
-    public string DisplayName { get; set; } = null!;
+    public string? DisplayName { get; set; }
 
     [Parameter, EditorRequired]
-    public string Provider { get; set; } = null!;
+    public string? Provider { get; set; }
 
     [Parameter]
     public bool IconOnly { get; set; }
 
     private string Initial {
         get {
-            string trimmed = DisplayName.Trim();
+            string trimmed = DisplayName?.Trim() ?? "";
             if (trimmed.Length == 0) {
                 return "?";
             }

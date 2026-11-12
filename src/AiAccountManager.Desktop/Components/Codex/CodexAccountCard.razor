@@ -1,138 +1,140 @@
 @using CloudyWing.AiAccountManager.Application.Accounts
 @using CloudyWing.AiAccountManager.Desktop.Components
 
-<MudPaper Elevation="0" Outlined="true" Class="@CardClass" data-provider="codex">
-    <div class="account-card-summary">
-        <div class="account-card-heading">
-            <AccountAvatar DisplayName="@DisplayName" Provider="codex" />
-            <div class="account-card-identity">
-                <div class="account-card-title">
-                    <MudText Typo="Typo.h6">@DisplayName</MudText>
-                    @if (IsLocallyMatched) {
-                        <MudChip T="string" Color="Color.Success" Variant="Variant.Text" Size="Size.Small">符合本機登入資料</MudChip>
-                    }
+@if (Account is not null) {
+    <MudPaper Elevation="0" Outlined="true" Class="@CardClass" data-provider="codex">
+        <div class="account-card-summary">
+            <div class="account-card-heading">
+                <AccountAvatar DisplayName="@DisplayName" Provider="codex" />
+                <div class="account-card-identity">
+                    <div class="account-card-title">
+                        <MudText Typo="Typo.h6">@DisplayName</MudText>
+                        @if (IsLocallyMatched) {
+                            <MudChip T="string" Color="Color.Success" Variant="Variant.Text" Size="Size.Small">符合本機登入資料</MudChip>
+                        }
+                    </div>
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">身分：@Account.MaskedIdentity</MudText>
                 </div>
-                <MudText Typo="Typo.body2" Class="mud-text-secondary">身分：@Account.MaskedIdentity</MudText>
+                <div class="account-card-actions">
+                    <MudChip T="string" Color="@StatusColor" Variant="Variant.Outlined" Size="Size.Small">@StatusText</MudChip>
+                    <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
+                                   Color="Color.Default"
+                                   Disabled="@(!CanMoveUp || Busy)"
+                                   title="@MoveUpTitle"
+                                   aria-label="@MoveUpAriaLabel"
+                                   OnClick="MoveUpAsync" />
+                    <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward"
+                                   Color="Color.Default"
+                                   Disabled="@(!CanMoveDown || Busy)"
+                                   title="@MoveDownTitle"
+                                   aria-label="@MoveDownAriaLabel"
+                                   OnClick="MoveDownAsync" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                                   Color="Color.Primary"
+                                   Disabled="@(!CanRefresh)"
+                                   title="@RefreshTitle"
+                                   aria-label="@RefreshTitle"
+                                   OnClick="RefreshAsync" />
+                    <MudIconButton Icon="@ExpandIcon"
+                                   Color="Color.Default"
+                                   aria-expanded="@(expanded ? "true" : "false")"
+                                   aria-label="@(expanded ? $"收合 {DisplayName} 詳細資料" : $"展開 {DisplayName} 詳細資料")"
+                                   OnClick="ToggleExpanded" />
+                </div>
             </div>
-            <div class="account-card-actions">
-                <MudChip T="string" Color="@StatusColor" Variant="Variant.Outlined" Size="Size.Small">@StatusText</MudChip>
-                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
-                               Color="Color.Default"
-                               Disabled="@(!CanMoveUp || Busy)"
-                               title="@MoveUpTitle"
-                               aria-label="@MoveUpAriaLabel"
-                               OnClick="MoveUpAsync" />
-                <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward"
-                               Color="Color.Default"
-                               Disabled="@(!CanMoveDown || Busy)"
-                               title="@MoveDownTitle"
-                               aria-label="@MoveDownAriaLabel"
-                               OnClick="MoveDownAsync" />
-                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
-                               Color="Color.Primary"
-                               Disabled="@(!CanRefresh)"
-                               title="@RefreshTitle"
-                               aria-label="@RefreshTitle"
-                               OnClick="RefreshAsync" />
-                <MudIconButton Icon="@ExpandIcon"
-                               Color="Color.Default"
-                               aria-expanded="@(expanded ? "true" : "false")"
-                               aria-label="@(expanded ? $"收合 {DisplayName} 詳細資料" : $"展開 {DisplayName} 詳細資料")"
-                               OnClick="ToggleExpanded" />
-            </div>
-        </div>
 
-        @if (Quota?.Snapshot?.LastSuccessfulSnapshot is QuotaSuccessfulSnapshot success) {
-            <div class="account-quota-grid">
-                <QuotaBar Label="5 小時"
-                          RemainingPercent="@success.FiveHour.RemainingPercent"
-                          ResetText="@FormatReset(success.FiveHour.ResetsAtUtc)" />
-                <QuotaBar Label="每週"
-                          RemainingPercent="@success.Weekly.RemainingPercent"
-                          ResetText="@FormatReset(success.Weekly.ResetsAtUtc)" />
-            </div>
-            <MudText Typo="Typo.caption" Class="mud-text-secondary">@QuotaUpdatedAtFormatter.Format(success.RetrievedAtUtc, DateTimeOffset.UtcNow)</MudText>
-            @if (success.ResetCredits is ResetCreditSummary credits) {
-                <MudText Typo="Typo.body2">重置券 @credits.AvailableCount 張・@CreditExpiry(credits)</MudText>
-                <details class="reset-credit-details">
-                    <summary>重置券明細</summary>
-                    <ul class="reset-credit-list">
-                        @foreach (ResetCredit credit in credits.Credits ?? []) {
-                            bool expiring = IsExpiring(credit.ExpiresAtUtc);
-                            <li class="@(expiring ? "reset-credit-item is-expiring" : "reset-credit-item")">
-                                <span class="reset-credit-name">@(credit.Title ?? credit.Id)</span>
-                                <span class="reset-credit-expiry">@(credit.ExpiresAtUtc is DateTimeOffset expiry ? TaiwanTimeUtils.Format(expiry) : "無期限")</span>
-                            </li>
-                        }
-                        @if (credits.AvailableCount > (credits.Credits?.Count ?? 0)) {
-                            <li class="reset-credit-more">另有 @(credits.AvailableCount - (credits.Credits?.Count ?? 0)) 張未列出明細</li>
-                        }
-                    </ul>
-                </details>
-                <MudButton Variant="Variant.Outlined" Disabled="@(Busy || credits.AvailableCount <= 0 || CreditRefreshRequired)" OnClick="UseCreditAsync">使用重置券</MudButton>
-                @if (CreditRefreshRequired) {
-                    <MudText Typo="Typo.caption">請先刷新額度，再決定是否使用重置券。</MudText>
-                } else if (credits.AvailableCount == 0) {
-                    <MudText Typo="Typo.caption">沒有可用重置券</MudText>
+            @if (Quota?.Snapshot?.LastSuccessfulSnapshot is QuotaSuccessfulSnapshot success) {
+                <div class="account-quota-grid">
+                    <QuotaBar Label="5 小時"
+                              RemainingPercent="@success.FiveHour.RemainingPercent"
+                              ResetText="@FormatReset(success.FiveHour.ResetsAtUtc)" />
+                    <QuotaBar Label="每週"
+                              RemainingPercent="@success.Weekly.RemainingPercent"
+                              ResetText="@FormatReset(success.Weekly.ResetsAtUtc)" />
+                </div>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">@QuotaUpdatedAtFormatter.Format(success.RetrievedAtUtc, DateTimeOffset.UtcNow)</MudText>
+                @if (success.ResetCredits is ResetCreditSummary credits) {
+                    <MudText Typo="Typo.body2">重置券 @credits.AvailableCount 張・@CreditExpiry(credits)</MudText>
+                    <details class="reset-credit-details">
+                        <summary>重置券明細</summary>
+                        <ul class="reset-credit-list">
+                            @foreach (ResetCredit credit in credits.Credits ?? []) {
+                                bool expiring = IsExpiring(credit.ExpiresAtUtc);
+                                <li class="@(expiring ? "reset-credit-item is-expiring" : "reset-credit-item")">
+                                    <span class="reset-credit-name">@(credit.Title ?? credit.Id)</span>
+                                    <span class="reset-credit-expiry">@(credit.ExpiresAtUtc is DateTimeOffset expiry ? TaiwanTimeUtils.Format(expiry) : "無期限")</span>
+                                </li>
+                            }
+                            @if (credits.AvailableCount > (credits.Credits?.Count ?? 0)) {
+                                <li class="reset-credit-more">另有 @(credits.AvailableCount - (credits.Credits?.Count ?? 0)) 張未列出明細</li>
+                            }
+                        </ul>
+                    </details>
+                    <MudButton Variant="Variant.Outlined" Disabled="@(Busy || credits.AvailableCount <= 0 || CreditRefreshRequired)" OnClick="UseCreditAsync">使用重置券</MudButton>
+                    @if (CreditRefreshRequired) {
+                        <MudText Typo="Typo.caption">請先刷新額度，再決定是否使用重置券。</MudText>
+                    } else if (credits.AvailableCount == 0) {
+                        <MudText Typo="Typo.caption">沒有可用重置券</MudText>
+                    }
+                } else {
+                    <MudText Typo="Typo.body2">重置券：未知</MudText>
+                    <MudButton Variant="Variant.Outlined" Disabled="true">使用重置券</MudButton>
                 }
+            } else if (Quota?.Status == QuotaDisplayStatus.Refreshing) {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">正在讀取額度；完成後會更新此摘要。</MudText>
             } else {
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">尚無成功額度快照；未知額度不以 0% 顯示。</MudText>
                 <MudText Typo="Typo.body2">重置券：未知</MudText>
                 <MudButton Variant="Variant.Outlined" Disabled="true">使用重置券</MudButton>
             }
-        } else if (Quota?.Status == QuotaDisplayStatus.Refreshing) {
-            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-            <MudText Typo="Typo.body2" Class="mud-text-secondary">正在讀取額度；完成後會更新此摘要。</MudText>
-        } else {
-            <MudText Typo="Typo.body2" Class="mud-text-secondary">尚無成功額度快照；未知額度不以 0% 顯示。</MudText>
-            <MudText Typo="Typo.body2">重置券：未知</MudText>
-            <MudButton Variant="Variant.Outlined" Disabled="true">使用重置券</MudButton>
-        }
 
-        @if (LastAutoUse is not null) {
-            <MudText Typo="Typo.body2">上次自動使用：@TaiwanTimeUtils.Format(LastAutoUse.AttemptedAtUtc)・@AutoUseResult(LastAutoUse.Result)</MudText>
-        }
-
-        <div class="account-primary-actions">
-            @if (!string.IsNullOrWhiteSpace(SwitchDisabledReason) && !IsLocallyMatched) {
-                <MudText Typo="Typo.caption" Class="mud-text-secondary account-disabled-reason">@SwitchDisabledReason</MudText>
-            }
-            <MudButton Color="Color.Primary"
-                       Variant="Variant.Filled"
-                       StartIcon="@Icons.Material.Filled.SwapHoriz"
-                       Disabled="@(Busy || !CanSwitch)"
-                       OnClick="SwitchAsync">
-                @(IsSwitching ? "正在切換…" : IsLocallyMatched ? "目前 Desktop 帳號" : "切換至此帳號")
-            </MudButton>
-        </div>
-    </div>
-
-    @if (expanded) {
-        <div class="account-card-details">
-            @if (Quota?.Snapshot?.LastSuccessfulSnapshot is QuotaSuccessfulSnapshot details) {
-                <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                    最後成功更新：@details.RetrievedAtUtc.ToLocalTime().ToString("yyyy/MM/dd HH:mm", CultureInfo.CurrentCulture)
-                    @if (Quota?.IsStale == true) {
-                        <span> · 顯示的是舊快照</span>
-                    }
-                </MudText>
+            @if (LastAutoUse is not null) {
+                <MudText Typo="Typo.body2">上次自動使用：@TaiwanTimeUtils.Format(LastAutoUse.AttemptedAtUtc)・@AutoUseResult(LastAutoUse.Result)</MudText>
             }
 
-            <div class="account-alias-row">
-                <MudTextField T="string" Label="帳號別名" Value="@AliasValue" ValueChanged="AliasChangedAsync" Immediate="true" Disabled="@Busy" />
-                <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@Busy" OnClick="SaveAliasAsync">保存別名</MudButton>
-            </div>
-            <div class="account-danger-row">
-                <MudButton Color="Color.Error" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.DeleteOutline" Disabled="@Busy" OnClick="RemoveAsync">移除此帳號</MudButton>
+            <div class="account-primary-actions">
+                @if (!string.IsNullOrWhiteSpace(SwitchDisabledReason) && !IsLocallyMatched) {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary account-disabled-reason">@SwitchDisabledReason</MudText>
+                }
+                <MudButton Color="Color.Primary"
+                           Variant="Variant.Filled"
+                           StartIcon="@Icons.Material.Filled.SwapHoriz"
+                           Disabled="@(Busy || !CanSwitch)"
+                           OnClick="SwitchAsync">
+                    @(IsSwitching ? "正在切換…" : IsLocallyMatched ? "目前 Desktop 帳號" : "切換至此帳號")
+                </MudButton>
             </div>
         </div>
-    }
-</MudPaper>
+
+        @if (expanded) {
+            <div class="account-card-details">
+                @if (Quota?.Snapshot?.LastSuccessfulSnapshot is QuotaSuccessfulSnapshot details) {
+                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                        最後成功更新：@details.RetrievedAtUtc.ToLocalTime().ToString("yyyy/MM/dd HH:mm", CultureInfo.CurrentCulture)
+                        @if (Quota?.IsStale == true) {
+                            <span> · 顯示的是舊快照</span>
+                        }
+                    </MudText>
+                }
+
+                <div class="account-alias-row">
+                    <MudTextField T="string" Label="帳號別名" Value="@AliasValue" ValueChanged="AliasChangedAsync" Immediate="true" Disabled="@Busy" />
+                    <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@Busy" OnClick="SaveAliasAsync">保存別名</MudButton>
+                </div>
+                <div class="account-danger-row">
+                    <MudButton Color="Color.Error" Variant="Variant.Text" StartIcon="@Icons.Material.Outlined.DeleteOutline" Disabled="@Busy" OnClick="RemoveAsync">移除此帳號</MudButton>
+                </div>
+            </div>
+        }
+    </MudPaper>
+}
 
 @code {
     private bool expanded;
 
     [Parameter, EditorRequired]
-    public CodexAccountProfile Account { get; set; } = null!;
+    public CodexAccountProfile? Account { get; set; }
 
     [Parameter]
     public QuotaSnapshotView? Quota { get; set; }
@@ -197,7 +199,11 @@
 
     private bool CanRefresh =>!Busy && Quota?.Status != QuotaDisplayStatus.Refreshing;
 
-    private string DisplayName => string.IsNullOrWhiteSpace(Account.Alias) ? Account.MaskedIdentity : Account.Alias;
+    private string? DisplayName => Account is null
+        ? null
+        : string.IsNullOrWhiteSpace(Account.Alias)
+            ? Account.MaskedIdentity
+            : Account.Alias;
 
     private string MoveUpTitle => CanMoveUp ? "上移帳號" : "目前已是第一個帳號，無法上移。";
 
@@ -231,11 +237,11 @@
 
     private Task AliasChangedAsync(string? value) => AliasValueChanged.InvokeAsync(value);
 
-    private Task SaveAliasAsync() => OnSaveAlias.InvokeAsync(Account.AccountId);
+    private Task SaveAliasAsync() => InvokeForAccountAsync(OnSaveAlias);
 
-    private Task RefreshAsync() => OnRefresh.InvokeAsync(Account.AccountId);
+    private Task RefreshAsync() => InvokeForAccountAsync(OnRefresh);
 
-    private Task UseCreditAsync() => OnUseCredit.InvokeAsync(Account.AccountId);
+    private Task UseCreditAsync() => InvokeForAccountAsync(OnUseCredit);
 
     private static string AutoUseResult(string result) => result switch {
         "reset" => "重置成功",
@@ -265,13 +271,19 @@
         return available.Length > 0 ? "無期限" : "到期時間未知";
     }
 
-    private Task RemoveAsync() => OnRemove.InvokeAsync(Account.AccountId);
+    private Task RemoveAsync() => InvokeForAccountAsync(OnRemove);
 
-    private Task SwitchAsync() => Busy || !CanSwitch ? Task.CompletedTask : OnSwitch.InvokeAsync(Account.AccountId);
+    private Task SwitchAsync() => Busy || !CanSwitch ? Task.CompletedTask : InvokeForAccountAsync(OnSwitch);
 
-    private Task MoveUpAsync() => OnMoveUp.InvokeAsync(Account.AccountId);
+    private Task MoveUpAsync() => InvokeForAccountAsync(OnMoveUp);
 
-    private Task MoveDownAsync() => OnMoveDown.InvokeAsync(Account.AccountId);
+    private Task MoveDownAsync() => InvokeForAccountAsync(OnMoveDown);
+
+    private Task InvokeForAccountAsync(EventCallback<Guid> callback) {
+        return Account is null
+            ? Task.CompletedTask
+            : callback.InvokeAsync(Account.AccountId);
+    }
 
     private void ToggleExpanded() {
         expanded = !expanded;

@@ -155,7 +155,7 @@ internal sealed class ClaudeDesktopSnapshotFileSystem {
 
     internal SnapshotFile OpenLockedFile(string rootPath, string path, FileMetadata expectedMetadata) {
         ClaudeWindowsPathSafety.EnsureNoReparsePoints(rootPath, path);
-        SafeFileHandle handle = OpenReadHandle(path, FileShareRead, asynchronous: true);
+        SafeFileHandle? handle = OpenReadHandle(path, FileShareRead, asynchronous: true);
         try {
             FileMetadata metadata = EnsureHandleMatchesPath(rootPath, path, handle);
             if (!expectedMetadata.IsSameFileAndVersion(metadata)) {
@@ -163,7 +163,8 @@ internal sealed class ClaudeDesktopSnapshotFileSystem {
             }
 
             FileStream stream = new(handle, FileAccess.Read, 4096, isAsync: true);
-            handle = null!;
+            // 所有權已轉交給 FileStream，設為 null 讓 finally 的 handle?.Dispose() 不會重複釋放
+            handle = null;
             return new SnapshotFile(this, rootPath, path, metadata, stream);
         } finally {
             handle?.Dispose();
@@ -178,11 +179,12 @@ internal sealed class ClaudeDesktopSnapshotFileSystem {
     ) {
         cancellationToken.ThrowIfCancellationRequested();
         ClaudeWindowsPathSafety.EnsureNoReparsePoints(rootPath, path);
-        SafeFileHandle handle = OpenReadHandle(path, FileShareRead | FileShareWrite | FileShareDelete, asynchronous: true);
+        SafeFileHandle? handle = OpenReadHandle(path, FileShareRead | FileShareWrite | FileShareDelete, asynchronous: true);
         FileStream stream;
         try {
             stream = new FileStream(handle, FileAccess.Read, 4096, isAsync: true);
-            handle = null!;
+            // 所有權已轉交給 FileStream，設為 null 讓 finally 的 handle?.Dispose() 不會重複釋放
+            handle = null;
         } finally {
             handle?.Dispose();
         }
