@@ -3,41 +3,80 @@ using System.IO;
 using System.Windows;
 using CloudyWing.AiAccountManager.Application.Operations;
 using CloudyWing.AiAccountManager.Application.Settings;
+using System.Windows.Media;
+using System.Windows.Threading;
 using Microsoft.AspNetCore.Components.WebView;
+using Microsoft.AspNetCore.Components.WebView.Wpf;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.Wpf;
+using Microsoft.Win32;
 
 namespace CloudyWing.AiAccountManager.Desktop;
 
 public partial class MainWindow : Window {
+    private const int RouteRestoreMaxAttempts = 50;
+
+    private static readonly TimeSpan WebViewDisposeTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan RouteRestoreDeadline = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan RouteDispatchTimeout = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan RouteRetryDelay = TimeSpan.FromMilliseconds(100);
+
     private readonly IHost host;
+    private readonly IServiceProvider services;
     private readonly ExclusiveOperationCoordinator operationCoordinator;
     private readonly StartupRenderProbe renderProbe;
     private readonly string webViewDataDirectory;
     private readonly SettingsService settings;
     private readonly ITrayService tray;
+    private readonly WebViewRecoveryLog recoveryLog;
+    private readonly WebViewRecoveryPolicy recoveryPolicy;
+    private readonly WebViewRebuildScheduler rebuildScheduler;
+    private readonly DispatcherTimer rebuildTimer;
+    private BlazorWebView currentWebView;
     private bool closeAllowed;
     private bool closeInProgress;
     private bool exitRequested;
+    private bool rebuilding;
+    private string? pendingRebuildReason;
+    private bool windowClosed;
 
     public MainWindow(IHost host, IServiceProvider services, string webViewDataDirectory) {
         this.host = host;
         ArgumentException.ThrowIfNullOrWhiteSpace(webViewDataDirectory);
         this.webViewDataDirectory = Path.GetFullPath(webViewDataDirectory);
+        this.services = services;
         operationCoordinator = services.GetRequiredService<ExclusiveOperationCoordinator>();
         renderProbe = services.GetRequiredService<StartupRenderProbe>();
         settings = services.GetRequiredService<SettingsService>();
         tray = services.GetRequiredService<ITrayService>();
+        recoveryLog = new WebViewRecoveryLog(ResolveDataRoot(this.webViewDataDirectory), probe: renderProbe);
+        recoveryPolicy = new WebViewRecoveryPolicy(() => DateTimeOffset.UtcNow);
+        rebuildTimer = new DispatcherTimer(DispatcherPriority.Normal, Dispatcher);
+        rebuildTimer.Tick += OnRebuildTimerTick;
+        rebuildScheduler = new WebViewRebuildScheduler(
+            () => DateTimeOffset.UtcNow,
+            ScheduleRebuildTick,
+            () => operationCoordinator.HasActiveOperations,
+            reason => _ = RebuildWebViewAsync(reason),
+            recoveryLog.Write
+        );
         InitializeComponent();
         if (renderProbe.IsEnabled) {
             SourceInitialized += OnSourceInitialized;
             Closed += OnClosed;
         }
-        blazorWebView.BlazorWebViewInitializing += OnBlazorWebViewInitializing;
-        blazorWebView.BlazorWebViewInitialized += OnBlazorWebViewInitialized;
-        blazorWebView.Services = services;
+        Closed += OnWindowClosed;
+        SystemEvents.SessionSwitch += OnSessionSwitch;
+        SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+#if DEBUG
+        PreviewKeyDown += OnDebugPreviewKeyDown;
+#endif
+        currentWebView = CreateWebView();
+        webViewHost.Children.Add(currentWebView);
     }
 
     /// <summary>
@@ -48,6 +87,41 @@ public partial class MainWindow : Window {
         Close();
     }
 
+    /// <summary>
+    /// 登記一次 WebView 重建要求，短時間內的重複要求會合併，且等待獨占作業結束後才執行。
+    /// </summary>
+    /// <param name="reason">觸發原因，寫入本機記錄。</param>
+    internal void RequestWebViewRecovery(string reason) {
+        if (!Dispatcher.CheckAccess()) {
+            _ = Dispatcher.BeginInvoke(new Action(() => RequestWebViewRecovery(reason)));
+            return;
+        }
+
+        if (windowClosed || closeInProgress || closeAllowed) {
+            return;
+        }
+
+        rebuildScheduler.Trigger(reason);
+    }
+
+    /// <summary>
+    /// 判斷 Dispatcher 未處理例外是否為可吞下的 WebView2 繪圖復原例外，可吞下時排程重建。
+    /// </summary>
+    /// <param name="exception">未處理例外。</param>
+    /// <returns>可吞下時為 <see langword="true"/>。</returns>
+    internal bool TrySwallowRenderException(Exception exception) {
+        bool swallow = recoveryPolicy.ShouldSwallow(exception, out string reason);
+        string typeName = exception.GetType().FullName ?? "unknown";
+        if (swallow) {
+            recoveryLog.Write($"exception.swallowed:{typeName}:0x{exception.HResult:X8}");
+            RequestWebViewRecovery("render-exception");
+        } else {
+            recoveryLog.Write($"exception.not-swallowed:{reason}:{typeName}:0x{exception.HResult:X8}");
+        }
+
+        return swallow;
+    }
+
     /// <summary>開啟指定 provider 的管理頁。</summary>
     /// <param name="provider">已驗證的 provider。</param>
     /// <returns>導覽工作。</returns>
@@ -56,8 +130,8 @@ public partial class MainWindow : Window {
             return;
         }
         for (int attempt = 0; attempt < 50 && !closeAllowed; attempt++) {
-            bool dispatched = await blazorWebView.TryDispatchAsync(services => {
-                services.GetRequiredService<NavigationManager>().NavigateTo($"/{provider}");
+            bool dispatched = await currentWebView.TryDispatchAsync(serviceProvider => {
+                serviceProvider.GetRequiredService<NavigationManager>().NavigateTo($"/{provider}");
             });
             if (dispatched) {
                 return;
@@ -65,6 +139,258 @@ public partial class MainWindow : Window {
             await Task.Delay(100);
         }
     }
+
+    private static string ResolveDataRoot(string webViewDirectory) {
+        string trimmed = Path.TrimEndingDirectorySeparator(webViewDirectory);
+        return Path.GetDirectoryName(trimmed) ?? trimmed;
+    }
+
+    private BlazorWebView CreateWebView() {
+        BlazorWebView view = new() {
+            Name = "blazorWebView",
+            HostPage = "wwwroot/index.html"
+        };
+        view.RootComponents.Add(new RootComponent {
+            Selector = "#app",
+            ComponentType = typeof(Components.App)
+        });
+        view.BlazorWebViewInitializing += OnBlazorWebViewInitializing;
+        view.BlazorWebViewInitialized += OnBlazorWebViewInitialized;
+        view.Services = services;
+        return view;
+    }
+
+    private void ScheduleRebuildTick(TimeSpan delay) {
+        rebuildTimer.Stop();
+        rebuildTimer.Interval = delay;
+        rebuildTimer.Start();
+    }
+
+    private void OnRebuildTimerTick(object? sender, EventArgs e) {
+        rebuildTimer.Stop();
+        rebuildScheduler.OnTick();
+    }
+
+    /// <summary>
+    /// 以新的 BlazorWebView 取代目前的控制項，並嘗試回到重建前的頁面。
+    /// </summary>
+    /// <param name="reason">觸發原因，寫入本機記錄。</param>
+    /// <returns>表示重建完成的工作。</returns>
+    internal async Task RebuildWebViewAsync(string reason) {
+        if (windowClosed || closeInProgress || closeAllowed) {
+            recoveryLog.Write("rebuild.skipped:closing");
+            return;
+        }
+
+        if (rebuilding) {
+            // 重建涵蓋舊控制項釋放與路由還原，期間的觸發延到完成後再排程，避免遺失尚未還原的頁面位置。
+            pendingRebuildReason = reason;
+            recoveryLog.Write("rebuild.queued:in-progress");
+            return;
+        }
+
+        rebuilding = true;
+        try {
+            await RebuildWebViewCoreAsync(reason);
+        } finally {
+            rebuilding = false;
+            if (pendingRebuildReason is string pendingReason) {
+                pendingRebuildReason = null;
+                RequestWebViewRecovery(pendingReason);
+            }
+        }
+    }
+
+    private async Task RebuildWebViewCoreAsync(string reason) {
+        BlazorWebView previous = currentWebView;
+        BlazorWebView? replacement = null;
+        string? route = null;
+        try {
+            recoveryLog.Write("rebuild.started:" + reason);
+            route = await CaptureRouteAsync(previous);
+            if (windowClosed || closeInProgress || closeAllowed) {
+                recoveryLog.Write("rebuild.skipped:closing");
+                return;
+            }
+
+            replacement = CreateWebView();
+            webViewHost.Children.Add(replacement);
+            // 舊控制項留在視覺樹內直到釋放完成，BlazorWebView 的釋放需要頁面仍可回應。
+            previous.Visibility = Visibility.Collapsed;
+            currentWebView = replacement;
+        } catch (Exception exception) {
+            recoveryLog.Write($"rebuild.failed:{exception.GetType().FullName}:0x{exception.HResult:X8}");
+            if (replacement is not null && !ReferenceEquals(currentWebView, replacement)) {
+                webViewHost.Children.Remove(replacement);
+            }
+            return;
+        }
+
+        await ReleaseWebViewAsync(previous);
+        recoveryLog.Write("rebuild.completed:" + reason);
+        if (route is not null) {
+            await RestoreRouteAsync(replacement, route);
+        }
+    }
+
+    private static async Task<string?> CaptureRouteAsync(BlazorWebView view) {
+        string? route = null;
+        try {
+            bool dispatched = await view.TryDispatchAsync(serviceProvider => {
+                NavigationManager navigation = serviceProvider.GetRequiredService<NavigationManager>();
+                route = navigation.ToBaseRelativePath(navigation.Uri);
+            }).WaitAsync(TimeSpan.FromSeconds(1));
+            if (dispatched && !string.IsNullOrEmpty(route) && !route.Contains("://", StringComparison.Ordinal)) {
+                return route;
+            }
+        } catch (Exception) {
+            // 舊控制項可能已失去回應，取不到頁面位置時改回首頁即可。
+        }
+
+        return null;
+    }
+
+    private async Task RestoreRouteAsync(BlazorWebView target, string route) {
+        // 派送會排在新 renderer 前置工作之後，可能一直不完成；每次派送與整體都設上限，
+        // 否則重建中旗標無法解除，之後的重建要求會全部停在 pending。
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + RouteRestoreDeadline;
+        bool navigated = false;
+        try {
+            for (int attempt = 0; attempt < RouteRestoreMaxAttempts; attempt++) {
+                if (!CanRestoreRoute(target)) {
+                    recoveryLog.Write("rebuild.route-restore-skipped");
+                    return;
+                }
+
+                TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
+                if (remaining <= TimeSpan.Zero) {
+                    recoveryLog.Write("rebuild.route-restore-failed:deadline-exceeded");
+                    return;
+                }
+
+                TimeSpan timeout = remaining < RouteDispatchTimeout ? remaining : RouteDispatchTimeout;
+                try {
+                    bool dispatched = await target.TryDispatchAsync(serviceProvider => {
+                        // 逾時後委派仍可能稍後執行，導覽前再次確認目標仍有效且尚未導覽過。
+                        if (navigated || !CanRestoreRoute(target)) {
+                            return;
+                        }
+
+                        navigated = true;
+                        serviceProvider.GetRequiredService<NavigationManager>().NavigateTo(route);
+                    }).WaitAsync(timeout);
+                    if (dispatched) {
+                        recoveryLog.Write(navigated ? "rebuild.route-restored" : "rebuild.route-restore-skipped");
+                        return;
+                    }
+                } catch (TimeoutException) {
+                    if (navigated) {
+                        recoveryLog.Write("rebuild.route-restored");
+                        return;
+                    }
+                }
+
+                await Task.Delay(RouteRetryDelay);
+            }
+
+            recoveryLog.Write("rebuild.route-restore-failed:attempts-exhausted:" + RouteRestoreMaxAttempts);
+        } catch (Exception exception) {
+            recoveryLog.Write($"rebuild.route-restore-failed:{exception.GetType().FullName}:0x{exception.HResult:X8}");
+        }
+    }
+
+    private bool CanRestoreRoute(BlazorWebView target) {
+        return ReferenceEquals(currentWebView, target) && !windowClosed && !closeInProgress && !closeAllowed;
+    }
+
+    private async Task ReleaseWebViewAsync(BlazorWebView view) {
+        string? failure = null;
+        try {
+            await view.DisposeAsync().AsTask().WaitAsync(WebViewDisposeTimeout);
+            recoveryLog.Write("rebuild.disposed");
+        } catch (Exception exception) {
+            failure = $"{exception.GetType().FullName}:0x{exception.HResult:X8}";
+            recoveryLog.Write("rebuild.dispose-failed:" + failure);
+        }
+
+        // BlazorWebView 的釋放會先等待 WebView 管理員，卡住時內部的 WebView2 控制項不會被釋放，
+        // 舊的 renderer 程序因此殘留。必須在控制項仍位於視覺樹時直接釋放 WebView2 控制項。
+        if (failure is not null) {
+            ForceDisposeWebView(view, failure);
+        }
+
+        webViewHost.Children.Remove(view);
+    }
+
+    private void ForceDisposeWebView(BlazorWebView view, string cause) {
+        try {
+            WebView2CompositionControl? control = FindVisualChild<WebView2CompositionControl>(view);
+            if (control is null) {
+                recoveryLog.Write("rebuild.webview-force-dispose-failed:control-not-found");
+                return;
+            }
+
+            control.Dispose();
+            recoveryLog.Write("rebuild.webview-force-disposed:" + cause);
+        } catch (Exception exception) {
+            recoveryLog.Write($"rebuild.webview-force-dispose-failed:{exception.GetType().FullName}:0x{exception.HResult:X8}");
+        }
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject {
+        int count = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++) {
+            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match) {
+                return match;
+            }
+
+            T? nested = FindVisualChild<T>(child);
+            if (nested is not null) {
+                return nested;
+            }
+        }
+
+        return null;
+    }
+
+    private void OnSessionSwitch(object? sender, SessionSwitchEventArgs e) {
+        if (e.Reason is SessionSwitchReason.SessionUnlock or SessionSwitchReason.RemoteConnect
+            or SessionSwitchReason.ConsoleConnect
+        ) {
+            RequestWebViewRecovery("session-" + e.Reason);
+        }
+    }
+
+    private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e) {
+        if (e.Mode == PowerModes.Resume) {
+            RequestWebViewRecovery("power-resume");
+        }
+    }
+
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e) {
+        RequestWebViewRecovery("display-settings-changed");
+    }
+
+    private void OnWindowClosed(object? sender, EventArgs e) {
+        windowClosed = true;
+        SystemEvents.SessionSwitch -= OnSessionSwitch;
+        SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+        rebuildScheduler.Cancel();
+        rebuildTimer.Stop();
+    }
+
+#if DEBUG
+    private void OnDebugPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e) {
+        if (e.Key == System.Windows.Input.Key.F12
+            && System.Windows.Input.Keyboard.Modifiers == (System.Windows.Input.ModifierKeys.Control | System.Windows.Input.ModifierKeys.Shift)
+        ) {
+            e.Handled = true;
+            _ = RebuildWebViewAsync("debug-hotkey");
+        }
+    }
+#endif
 
     private void OnBlazorWebViewInitializing(object? sender, BlazorWebViewInitializingEventArgs e) {
         renderProbe.RecordEvent("blazor-webview.initializing.started");
@@ -108,6 +434,9 @@ public partial class MainWindow : Window {
     }
 
     private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e) {
+        if (e.IsSuccess) {
+            recoveryPolicy.MarkRendered();
+        }
         renderProbe.RecordEvent(
             "webview2.navigation.completed",
             e.IsSuccess ? "success" : "failure",
@@ -121,7 +450,16 @@ public partial class MainWindow : Window {
             "failure",
             $"{e.ProcessFailedKind}:{e.Reason}"
         );
+        recoveryLog.Write("process-failed:" + e.ProcessFailedKind);
+        // GPU 程序結束時 WebView2 會自行重啟，只記錄不重建。
+        if (e.ProcessFailedKind is CoreWebView2ProcessFailedKind.RenderProcessExited
+            or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive
+            or CoreWebView2ProcessFailedKind.BrowserProcessExited
+        ) {
+            RequestWebViewRecovery("process-failed:" + e.ProcessFailedKind);
+        }
     }
+
     private async void OnClosing(object? sender, CancelEventArgs e) {
         string closeState = closeAllowed ? "allowed" : "shutdown-pending";
         if (closeInProgress && !closeAllowed) {

@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.3.2 (2026-11-13)
+
+### New Features
+
+- Codex 重置消息新增「可能重置」一行，顯示 codex-resets.com 提供的重置機率、預測等級、預測時段、有效期限與原文連結。預測過期或資料缺少有效期限時不顯示，也不影響其餘消息。
+
+### Bug Fixes
+
+- 修正主視窗長時間開啟後整片空白、無法恢復的問題。解除鎖定、電腦喚醒、顯示設定變更、從系統匣叫回視窗或 WebView2 程序失敗時，程式會重建網頁畫面並回到原本的頁面。重建事件記錄於 `%LOCALAPPDATA%\AiAccountManager\data\logs\webview-recovery.log`。
+- 補上正體中文字型後備，修正部分中文字的粗細與顏色和同一行其他文字不一致。
+
+### Changes
+
+- Blazor 元件的必填參數改為可為 null 的宣告並在使用處處理，未傳入參數時不再拋出例外。
+
+### Tests
+
+- 修正 UI 測試讀取 Desktop 程式結束代碼時拋出例外，`CloseMainWindow_ShutsDownGracefully` 恢復通過。
+
+### Documentation
+
+- README 與 docs/packaging.md 的封裝範例版號更新為 0.3.2。
+
 ## v0.3.1 (2026-11-09)
 
 ### Bug Fixes

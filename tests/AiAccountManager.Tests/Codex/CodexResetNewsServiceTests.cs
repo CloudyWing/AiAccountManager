@@ -108,6 +108,95 @@ public sealed class CodexResetNewsServiceTests {
         Assert.That(settings?.IsCodexResetNewsEnabled, Is.True);
     }
 
+    [Test]
+    public async Task ActiveWatchIsParsedFromActualResponse() {
+        NewsFixture fixture = await NewsFixture.CreateAsync();
+        using CodexResetNewsService service = fixture.Service;
+        fixture.Client.Result = Response("""
+            {"data":{"latest_reset":{"id":"2117035794678546764","reset_type":"banked","announced_at":"2026-11-01T23:27:20.000Z","text":"Day 28/ Banked 2/2","source":{"type":"x_post","author":"thsottiaux","url":"https://x.com/thsottiaux/status/2117035794678546764"}},"scheduled_reset":null,"active_watch":{"level":"elevated","reset_chance_percent":65,"forecast_window":"by end of Thursday","observed_at":"2026-11-11T06:57:08.000Z","expires_at":"2026-11-13T08:00:00.000Z","text":"Thursday is feeling codexy to me.","source":{"type":"x_post","author":"thsottiaux","url":"https://x.com/thsottiaux/status/2120410480204525936"}},"stats":{"total":71,"last_reset_at":"2026-11-01T23:27:20.000Z","days_since_last":10.6,"avg_interval_days":5.9}},"meta":{"api_version":"v1","generated_at":"2026-11-12T13:45:55.527Z"}}
+            """);
+        await service.RefreshAsync(CancellationToken.None);
+        CodexResetNewsService.State state = service.Current;
+        Assert.That(state.IsUnavailable, Is.False);
+        Assert.That(state.WatchLevel, Is.EqualTo("elevated"));
+        Assert.That(state.WatchChancePercent, Is.EqualTo(65));
+        Assert.That(state.WatchForecastWindow, Is.EqualTo("by end of Thursday"));
+        Assert.That(state.WatchExpiresAtUtc, Is.EqualTo(DateTimeOffset.Parse("2026-11-13T08:00:00Z")));
+        Assert.That(state.WatchUrl?.AbsoluteUri, Is.EqualTo("https://x.com/thsottiaux/status/2120410480204525936"));
+        Assert.That(state.AverageDays, Is.EqualTo(5.9));
+        Assert.That(state.LatestAtUtc, Is.EqualTo(DateTimeOffset.Parse("2026-11-01T23:27:20Z")));
+    }
+
+    [Test]
+    public async Task NullOrMissingActiveWatchLeavesWatchFieldsNull() {
+        NewsFixture fixture = await NewsFixture.CreateAsync();
+        using CodexResetNewsService service = fixture.Service;
+        fixture.Client.Result = Response("""{"data":{"scheduled_reset":null,"latest_reset":null,"active_watch":null}}""");
+        await service.RefreshAsync(CancellationToken.None);
+        Assert.That(service.Current.IsUnavailable, Is.False);
+        AssertNoWatch(service.Current);
+
+        fixture.Clock.UtcNow += TimeSpan.FromMinutes(15);
+        fixture.Client.Result = Response("""{"data":{"scheduled_reset":null,"latest_reset":null}}""");
+        await service.RefreshAsync(CancellationToken.None);
+        Assert.That(service.Current.IsUnavailable, Is.False);
+        AssertNoWatch(service.Current);
+    }
+
+    [TestCase("\"text\"")]
+    [TestCase("[1,2]")]
+    [TestCase("{\"level\":\"elevated\",\"reset_chance_percent\":65,\"expires_at\":\"not-a-date\"}")]
+    [TestCase("{\"level\":\"elevated\",\"reset_chance_percent\":65,\"expires_at\":\"2026-11-13T08:00:00+08:00\"}")]
+    [TestCase("{\"forecast_window\":\"by end of Thursday\"}")]
+    [TestCase("{\"level\":\"elevated\",\"reset_chance_percent\":65}")]
+    [TestCase("{\"level\":\"elevated\",\"reset_chance_percent\":65,\"expires_at\":null}")]
+    public async Task MalformedActiveWatchIsIgnoredWithoutMakingStateUnavailable(string activeWatch) {
+        NewsFixture fixture = await NewsFixture.CreateAsync();
+        using CodexResetNewsService service = fixture.Service;
+        fixture.Client.Result = Response("""
+            {"data":{"scheduled_reset":{"scheduled_for":"2026-10-28T06:29:38Z"},"latest_reset":null,"stats":{"avg_interval_days":14.5},"active_watch":
+            """ + activeWatch + "}}");
+        await service.RefreshAsync(CancellationToken.None);
+        Assert.That(service.Current.IsUnavailable, Is.False);
+        Assert.That(service.Current.HasScheduled, Is.True);
+        Assert.That(service.Current.AverageDays, Is.EqualTo(14.5));
+        AssertNoWatch(service.Current);
+    }
+
+    [TestCase("-1")]
+    [TestCase("101")]
+    [TestCase("65.5")]
+    [TestCase("\"65\"")]
+    public async Task OutOfRangeChanceBecomesNullButLevelIsKept(string chance) {
+        NewsFixture fixture = await NewsFixture.CreateAsync();
+        using CodexResetNewsService service = fixture.Service;
+        fixture.Client.Result = Response("{\"data\":{\"scheduled_reset\":null,\"active_watch\":{\"level\":\"watch\",\"expires_at\":\"2026-11-13T08:00:00Z\",\"reset_chance_percent\":" + chance + "}}}");
+        await service.RefreshAsync(CancellationToken.None);
+        Assert.That(service.Current.IsUnavailable, Is.False);
+        Assert.That(service.Current.WatchChancePercent, Is.Null);
+        Assert.That(service.Current.WatchLevel, Is.EqualTo("watch"));
+    }
+
+    [Test]
+    public async Task NonHttpsWatchSourceUrlIsIgnored() {
+        NewsFixture fixture = await NewsFixture.CreateAsync();
+        using CodexResetNewsService service = fixture.Service;
+        fixture.Client.Result = Response("""
+            {"data":{"scheduled_reset":null,"active_watch":{"level":"elevated","reset_chance_percent":10,"expires_at":"2026-11-13T08:00:00Z","source":{"url":"http://example.test/watch"}}}}
+            """);
+        await service.RefreshAsync(CancellationToken.None);
+        Assert.That(service.Current.WatchChancePercent, Is.EqualTo(10));
+        Assert.That(service.Current.WatchUrl, Is.Null);
+    }
+
+    private static void AssertNoWatch(CodexResetNewsService.State state) {
+        Assert.That(state.WatchLevel, Is.Null);
+        Assert.That(state.WatchChancePercent, Is.Null);
+        Assert.That(state.WatchForecastWindow, Is.Null);
+        Assert.That(state.WatchExpiresAtUtc, Is.Null);
+        Assert.That(state.WatchUrl, Is.Null);
+    }
+
     private static ICodexResetNewsClient.Result Response(string json) {
         using JsonDocument document = JsonDocument.Parse(json);
         return new(document.RootElement.Clone(), false, null);

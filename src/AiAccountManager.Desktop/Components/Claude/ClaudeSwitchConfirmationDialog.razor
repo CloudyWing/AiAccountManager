@@ -88,19 +88,19 @@
     public EventCallback<bool> VisibleChanged { get; set; }
 
     [Parameter, EditorRequired]
-    public string SourceDisplayName { get; set; } = null!;
+    public string? SourceDisplayName { get; set; }
 
     [Parameter, EditorRequired]
-    public string SourceIdentity { get; set; } = null!;
+    public string? SourceIdentity { get; set; }
 
     [Parameter]
     public string? SourceOrganization { get; set; }
 
     [Parameter, EditorRequired]
-    public string TargetDisplayName { get; set; } = null!;
+    public string? TargetDisplayName { get; set; }
 
     [Parameter, EditorRequired]
-    public string TargetIdentity { get; set; } = null!;
+    public string? TargetIdentity { get; set; }
 
     [Parameter]
     public string? TargetOrganization { get; set; }

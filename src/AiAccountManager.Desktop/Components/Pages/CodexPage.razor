@@ -94,6 +94,12 @@
                     預定下次重置：@(news.HasScheduled ? news.ScheduledAtUtc.HasValue ? TaiwanTimeUtils.Format(news.ScheduledAtUtc.Value) : "已宣布，時間未定" : "目前沒有預定")
                     @if (news.ScheduledUrl is not null) { <a href="@news.ScheduledUrl" target="_blank" rel="noopener noreferrer">原文</a> }
                 </MudText>
+                @if (HasActiveWatch(news)) {
+                    <MudText>
+                        可能重置：@(WatchSummary(news) + " ")
+                        @if (news.WatchUrl is not null) { <a href="@news.WatchUrl" target="_blank" rel="noopener noreferrer">原文</a> }
+                    </MudText>
+                }
                 <MudText>
                     最近一次重置：@(news.LatestAtUtc.HasValue ? TaiwanTimeUtils.Format(news.LatestAtUtc.Value) + "（" + DaysSince(news.LatestAtUtc.Value) + " 天前）" : "尚無最近一次重置")
                     @if (news.LatestUrl is not null) { <a href="@news.LatestUrl" target="_blank" rel="noopener noreferrer">原文</a> }
@@ -590,6 +596,29 @@
 
     private bool HasDesktopSnapshot(Guid? accountId) {
         return accountId is Guid id && desktopState?.AccountsWithSnapshot.Contains(id) == true;
+    }
+
+    private bool HasActiveWatch(CodexResetNewsService.State news) {
+        return (news.WatchLevel is not null || news.WatchChancePercent is not null)
+            && news.WatchExpiresAtUtc is DateTimeOffset expires
+            && expires > Clock.UtcNow;
+    }
+
+    private static string WatchSummary(CodexResetNewsService.State news) {
+        List<string> parts = [];
+        if (news.WatchChancePercent is int chance) {
+            parts.Add("機率 " + chance.ToString(CultureInfo.InvariantCulture) + "%"
+                + (news.WatchLevel is null ? "" : "（" + news.WatchLevel + "）"));
+        } else if (news.WatchLevel is not null) {
+            parts.Add("等級 " + news.WatchLevel);
+        }
+        if (news.WatchForecastWindow is not null) {
+            parts.Add("預測時段 " + news.WatchForecastWindow);
+        }
+        if (news.WatchExpiresAtUtc is DateTimeOffset expires) {
+            parts.Add("有效至 " + TaiwanTimeUtils.Format(expires));
+        }
+        return string.Join("・", parts);
     }
 
     private int DaysSince(DateTimeOffset value) {

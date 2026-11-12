@@ -157,10 +157,10 @@
     private string? lastAlias;
 
     [Parameter, EditorRequired]
-    public string DisplayName { get; set; } = null!;
+    public string? DisplayName { get; set; }
 
     [Parameter, EditorRequired]
-    public string MaskedIdentity { get; set; } = null!;
+    public string? MaskedIdentity { get; set; }
 
     [Parameter]
     public string? Alias { get; set; }

@@ -95,7 +95,7 @@ Codex Desktop 的 `%USERPROFILE%\.codex\auth.json` 只在使用者保存登入�
 package-windows.ps1 需要本機的 app-server ZIP cache 與 Velopack CLI。Velopack CLI 以 dotnet local tool 宣告於 .config\dotnet-tools.json，腳本會先執行 `dotnet tool restore` 再呼叫 `dotnet tool run vpk`。app-server ZIP 預設讀取 repository .local 目錄，也可提供可攜參數：
 
 ```powershell
-pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.3.1 -AppServerZipPath .\.local\cache\codex-app-server\rust-v0.162.1\codex-app-server-x86_64-pc-windows-msvc.exe.zip
+pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.3.2 -AppServerZipPath .\.local\cache\codex-app-server\rust-v0.162.1\codex-app-server-x86_64-pc-windows-msvc.exe.zip
 ```
 
 需要改用其他位置的 vpk.exe 時，以 `-VpkToolPath` 指定。

@@ -31,7 +31,17 @@
 </div>
 
 @code {
-    private static readonly MudTheme Theme = new() {
+    // MudBlazor 各字級預設只有西文字型，補上正體中文字型，避免部分中文字改用其他後備字型而粗細不一致。
+    private static readonly string[] FontFamily = [
+        "Roboto",
+        "Microsoft JhengHei UI",
+        "Microsoft JhengHei",
+        "Helvetica",
+        "Arial",
+        "sans-serif"
+    ];
+
+    private static readonly MudTheme Theme = ApplyFontFamily(new() {
         PaletteLight = new PaletteLight {
             Background = "#ffffff",
             Surface = "#f6f6f7",
@@ -63,7 +73,7 @@
             Secondary = "#f97316",
             Tertiary = "#d97706"
         }
-    };
+    });
 
     private MudThemeProvider? themeProvider;
     private bool isDarkMode;
@@ -91,6 +101,31 @@
 
     public void Dispose() {
         SettingsState.StateChanged -= OnSettingsChanged;
+    }
+
+    private static MudTheme ApplyFontFamily(MudTheme theme) {
+        Typography typography = theme.Typography;
+        BaseTypography[] levels = [
+            typography.Default,
+            typography.H1,
+            typography.H2,
+            typography.H3,
+            typography.H4,
+            typography.H5,
+            typography.H6,
+            typography.Subtitle1,
+            typography.Subtitle2,
+            typography.Body1,
+            typography.Body2,
+            typography.Button,
+            typography.Caption,
+            typography.Overline
+        ];
+        foreach (BaseTypography level in levels) {
+            level.FontFamily = FontFamily;
+        }
+
+        return theme;
     }
 
     private Task OnSystemDarkModeChangedAsync(bool isDark) {
