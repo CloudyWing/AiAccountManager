@@ -34,10 +34,18 @@ public sealed class DesktopAppSession : IDisposable {
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(250);
 
     private readonly string workingRoot;
+    private readonly Process process;
     private bool disposed;
 
-    private DesktopAppSession(string workingRoot, Application application, UIA3Automation automation, Window mainWindow) {
+    private DesktopAppSession(
+        string workingRoot,
+        Process process,
+        Application application,
+        UIA3Automation automation,
+        Window mainWindow
+    ) {
         this.workingRoot = workingRoot;
+        this.process = process;
         Application = application;
         Automation = automation;
         MainWindow = mainWindow;
@@ -57,6 +65,11 @@ public sealed class DesktopAppSession : IDisposable {
     /// 主視窗。
     /// </summary>
     public Window MainWindow { get; }
+
+    /// <summary>
+    /// 受測程式的結束代碼；程式尚未結束時拋出 <see cref="InvalidOperationException"/>。
+    /// </summary>
+    public int ExitCode => process.ExitCode;
 
     /// <summary>
     /// 本次啟動使用的資料目錄。
@@ -102,7 +115,10 @@ public sealed class DesktopAppSession : IDisposable {
         startInfo.ArgumentList.Add("--startup-render-probe");
         startInfo.ArgumentList.Add(markerPath);
 
-        Application application = Application.Launch(startInfo);
+        // FlaUI 的 Application 讀不到結束代碼，且會處置交給它的 Process；保留另一個自行啟動的 Process 供 ExitCode 使用。
+        Process process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("無法啟動 Desktop 程式。");
+        Application application = Application.Attach(process.Id);
         UIA3Automation automation = new();
         try {
             bool rendered = Retry.WhileFalse(
@@ -120,9 +136,10 @@ public sealed class DesktopAppSession : IDisposable {
 
             Window mainWindow = application.GetMainWindow(automation, StartupTimeout)
                 ?? throw new InvalidOperationException("找不到 Desktop 主視窗。");
-            return new DesktopAppSession(workingRoot, application, automation, mainWindow);
+            return new DesktopAppSession(workingRoot, process, application, automation, mainWindow);
         } catch {
             ForceStop(application);
+            process.Dispose();
             automation.Dispose();
             TryDeleteDirectory(workingRoot);
             throw;
@@ -231,6 +248,7 @@ public sealed class DesktopAppSession : IDisposable {
             ForceStop(Application);
         } finally {
             Application.Dispose();
+            process.Dispose();
             Automation.Dispose();
             TryDeleteDirectory(workingRoot);
         }

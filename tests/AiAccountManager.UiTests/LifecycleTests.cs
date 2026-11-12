@@ -18,7 +18,7 @@ public sealed class LifecycleTests {
 
         Assert.Multiple(() => {
             Assert.That(exited, Is.True, "關閉主視窗後程式沒有在時限內結束。");
-            Assert.That(session.Application.ExitCode, Is.Zero);
+            Assert.That(session.ExitCode, Is.Zero);
             Assert.That(diagnostics, Does.Contain("\"main-window.closed\""));
             Assert.That(diagnostics, Does.Contain("\"application.run.completed\""));
         });
