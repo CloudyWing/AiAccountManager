@@ -16,7 +16,7 @@ public sealed class CodexResetNewsService : IDisposable {
     private DateTimeOffset nextAllowedUtc;
     private long generation;
     private bool enabled;
-    private State current = new(false, false, false, null, null, null, null, null);
+    private State current = new(false, false, false, null, null, null, null, null, null, null, null, null, null);
 
     /// <summary>建立重置消息服務。</summary>
     /// <param name="settings">設定服務。</param>
@@ -63,18 +63,18 @@ public sealed class CodexResetNewsService : IDisposable {
                     nextAllowedUtc = retry;
                 }
                 current = result.Payload is JsonElement payload && TryParse(payload, out State? parsed)
-                    ? parsed : new State(false, true, false, null, null, null, null, null);
+                    ? parsed : new State(false, true, false, null, null, null, null, null, null, null, null, null, null);
             }
         } catch (OperationCanceledException) when (request.IsCancellationRequested) {
             lock (sync) {
                 if (requestGeneration == generation && enabled) {
-                    current = new State(false, true, false, null, null, null, null, null);
+                    current = new State(false, true, false, null, null, null, null, null, null, null, null, null, null);
                 }
             }
         } catch (Exception) {
             lock (sync) {
                 if (requestGeneration == generation && enabled) {
-                    current = new State(false, true, false, null, null, null, null, null);
+                    current = new State(false, true, false, null, null, null, null, null, null, null, null, null, null);
                 }
             }
         } finally {
@@ -99,7 +99,7 @@ public sealed class CodexResetNewsService : IDisposable {
             generation++;
             if (!enabled) {
                 cancel = active;
-                current = new State(false, false, false, null, null, null, null, null);
+                current = new State(false, false, false, null, null, null, null, null, null, null, null, null, null);
             }
         }
         try { cancel?.Cancel(); } catch (ObjectDisposedException) { }
@@ -133,8 +133,52 @@ public sealed class CodexResetNewsService : IDisposable {
             && avg.TryGetDouble(out double number) && double.IsFinite(number) && number >= 0) {
             average = number;
         }
-        state = new State(false, false, scheduled.ValueKind == JsonValueKind.Object, scheduledAt, scheduledUrl, latestAt, latestUrl, average);
+        ReadActiveWatch(data, out string? watchLevel, out int? watchChance, out string? watchWindow, out DateTimeOffset? watchExpires, out Uri? watchUrl);
+        state = new State(false, false, scheduled.ValueKind == JsonValueKind.Object, scheduledAt, scheduledUrl, latestAt, latestUrl, average,
+            watchLevel, watchChance, watchWindow, watchExpires, watchUrl);
         return true;
+    }
+
+    private static void ReadActiveWatch(
+        JsonElement data,
+        out string? level,
+        out int? chancePercent,
+        out string? forecastWindow,
+        out DateTimeOffset? expiresAtUtc,
+        out Uri? url
+    ) {
+        level = null;
+        chancePercent = null;
+        forecastWindow = null;
+        expiresAtUtc = null;
+        url = null;
+        // active_watch 只是預測資訊，必須帶有效的失效時間；格式不符時整段忽略，不影響其餘消息。
+        if (!data.TryGetProperty("active_watch", out JsonElement watch) || watch.ValueKind != JsonValueKind.Object
+            || !TryTime(watch, "expires_at", out DateTimeOffset? expires) || !expires.HasValue) {
+            return;
+        }
+        string? watchLevel = ReadString(watch, "level");
+        int? watchChance = null;
+        if (watch.TryGetProperty("reset_chance_percent", out JsonElement chance) && chance.ValueKind == JsonValueKind.Number
+            && chance.TryGetInt32(out int percent) && percent is >= 0 and <= 100) {
+            watchChance = percent;
+        }
+        if (watchLevel is null && watchChance is null) {
+            return;
+        }
+        level = watchLevel;
+        chancePercent = watchChance;
+        forecastWindow = ReadString(watch, "forecast_window");
+        expiresAtUtc = expires;
+        url = ReadUrl(watch);
+    }
+
+    private static string? ReadString(JsonElement obj, string name) {
+        if (obj.TryGetProperty(name, out JsonElement element) && element.ValueKind == JsonValueKind.String
+            && element.GetString() is string text && !string.IsNullOrWhiteSpace(text)) {
+            return text;
+        }
+        return null;
     }
 
     private static bool TryTime(JsonElement obj, string name, out DateTimeOffset? value) {
@@ -172,6 +216,13 @@ public sealed class CodexResetNewsService : IDisposable {
     /// <param name="LatestAtUtc">最近重置時間。</param>
     /// <param name="LatestUrl">最近消息來源。</param>
     /// <param name="AverageDays">平均間隔天數。</param>
+    /// <param name="WatchLevel">重置預測等級，沒有預測時為 null。</param>
+    /// <param name="WatchChancePercent">重置預測機率（0 至 100），未提供時為 null。</param>
+    /// <param name="WatchForecastWindow">預測時段說明，未提供時為 null。</param>
+    /// <param name="WatchExpiresAtUtc">預測失效時間，有預測時必有值。</param>
+    /// <param name="WatchUrl">預測消息來源。</param>
     public sealed record State(bool IsLoading, bool IsUnavailable, bool HasScheduled, DateTimeOffset? ScheduledAtUtc,
-        Uri? ScheduledUrl, DateTimeOffset? LatestAtUtc, Uri? LatestUrl, double? AverageDays);
+        Uri? ScheduledUrl, DateTimeOffset? LatestAtUtc, Uri? LatestUrl, double? AverageDays,
+        string? WatchLevel = null, int? WatchChancePercent = null, string? WatchForecastWindow = null,
+        DateTimeOffset? WatchExpiresAtUtc = null, Uri? WatchUrl = null);
 }
