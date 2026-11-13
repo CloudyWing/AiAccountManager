@@ -45,7 +45,7 @@ public sealed class CodexAccountCardTests : ComponentTestBase {
             .Add(p => p.SwitchDisabledReason, "已是目前帳號。"));
 
         Assert.Multiple(() => {
-            Assert.That(cut.Markup, Does.Contain("符合本機登入資料"));
+            Assert.That(cut.Markup, Does.Contain("目前 Desktop 使用中"));
             Assert.That(cut.FindButton("目前 Desktop 帳號").IsDisabled(), Is.True);
             Assert.That(cut.Markup, Does.Not.Contain("已是目前帳號。"));
         });
@@ -102,7 +102,7 @@ public sealed class CodexAccountCardTests : ComponentTestBase {
 
         Assert.Multiple(() => {
             Assert.That(cut.FindAll(".quota-bar"), Is.Empty);
-            Assert.That(cut.Markup, Does.Contain("尚無成功額度快照"));
+            Assert.That(cut.Markup, Does.Contain("尚未取得額度"));
             Assert.That(cut.FindButton("使用重置券").IsDisabled(), Is.True);
         });
     }
@@ -301,6 +301,45 @@ public sealed class CodexAccountCardTests : ComponentTestBase {
             Assert.That(last.ClassList, Does.Contain("reset-credit-more"));
             Assert.That(last.TextContent.Trim(), Is.EqualTo("另有 2 張未列出明細"));
             Assert.That(cut.FindAll(".reset-credit-list .mud-typography"), Is.Empty);
+        });
+    }
+
+    [Test]
+    public void FreePlan_ShowsPlanLabelAndOnlyThirtyDayQuotaBar() {
+        QuotaSuccessfulSnapshot success = new(
+            DateTimeOffset.UtcNow.AddMinutes(-1),
+            null,
+            null,
+            new ResetCreditSummary(0, []),
+            new QuotaWindow(43200, 99, DateTimeOffset.UtcNow.AddDays(30))
+        );
+        QuotaSnapshotRecord record = new(Account.AccountId, Account.IdentityFingerprint, Account.ProfileRevision, success, null);
+        QuotaSnapshotView view = new(Account.AccountId, record, QuotaDisplayStatus.Fresh, false, null);
+
+        IRenderedComponent<CodexAccountCard> cut = RenderCard(Account, parameters => parameters.Add(p => p.Quota, view));
+
+        Assert.Multiple(() => {
+            Assert.That(cut.Markup, Does.Contain("免費方案"));
+            Assert.That(cut.FindAll(".quota-bar"), Has.Count.EqualTo(1));
+            Assert.That(cut.Find(".quota-bar .mud-typography-subtitle2").TextContent.Trim(), Is.EqualTo("30 天"));
+            Assert.That(cut.Find(".quota-bar-value strong").TextContent.Trim(), Does.StartWith("99"));
+            Assert.That(cut.Markup, Does.Not.Contain("5 小時"));
+            Assert.That(cut.Markup, Does.Not.Contain("每週"));
+            Assert.That(cut.Markup, Does.Not.Contain("回應不完整"));
+        });
+    }
+
+    [Test]
+    public void StandardPlan_ShowsFiveHourAndWeeklyBarsWithoutPlanLabel() {
+        IRenderedComponent<CodexAccountCard> cut = RenderCard(Account, parameters => parameters
+            .Add(p => p.Quota, CreateView(1)));
+
+        Assert.Multiple(() => {
+            Assert.That(cut.Markup, Does.Not.Contain("免費方案"));
+            Assert.That(cut.FindAll(".quota-bar"), Has.Count.EqualTo(2));
+            Assert.That(cut.Markup, Does.Contain("5 小時"));
+            Assert.That(cut.Markup, Does.Contain("每週"));
+            Assert.That(cut.Markup, Does.Not.Contain("30 天"));
         });
     }
 }

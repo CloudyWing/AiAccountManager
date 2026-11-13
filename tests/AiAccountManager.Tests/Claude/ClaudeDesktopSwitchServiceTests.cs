@@ -6,10 +6,26 @@ namespace CloudyWing.AiAccountManager.Tests.Claude;
 
 [TestFixture]
 public sealed class ClaudeDesktopSwitchServiceTests {
-    [TestCase("unknown-failure")]
+    [TestCase("source-directory-missing")]
+    [TestCase("index-path-is-file")]
+    [TestCase("source-index-too-large")]
+    [TestCase("source-index-entry-unsupported")]
+    [TestCase("source-index-json-invalid")]
+    [TestCase("source-index-session-id-invalid")]
+    [TestCase("source-path-unsafe")]
+    [TestCase("source-directory-unreadable")]
+    [TestCase("source-unreadable")]
+    [TestCase("transcript-root-unavailable")]
+    [TestCase("transcript-root-missing")]
+    [TestCase("transcript-missing")]
+    [TestCase("transcript-not-unique")]
+    [TestCase("transcript-unreadable")]
+    [TestCase("transcript-root-unreadable")]
+    [TestCase("history-source-binding-unknown")]
+    [TestCase("unrecognized-code")]
     [TestCase(null)]
     [TestCase(" ")]
-    public async Task PreviewSwitchAsync_HistoryFailureCode_ShowsCodeWhenPresent(string? failureCode) {
+    public async Task PreviewSwitchAsync_HistoryFailureCode_ShowsSingleMessageWithoutCode(string? failureCode) {
         SwitchFixture fixture = CreateFixture(includeHistory: true);
         fixture.HistoryStore!.ValidationOverride = new(
             IClaudeSessionHistoryStore.ValidationStatus.MissingDirectory, 0, failureCode
@@ -20,42 +36,11 @@ public sealed class ClaudeDesktopSwitchServiceTests {
 
         Assert.That(preview.CanProceed, Is.False);
         Assert.That(preview.Outcome, Is.EqualTo(ClaudeDesktopSwitchService.PreviewOutcome.HistoryUnavailable));
-        if (string.IsNullOrWhiteSpace(failureCode)) {
-            Assert.That(preview.Message, Does.Not.Contain("原因代碼"));
-        } else {
-            Assert.That(preview.Message, Does.Contain($"原因代碼：{failureCode}"));
+        Assert.That(preview.Message, Is.EqualTo("無法讀取來源帳號的 Code Session 資料，未開始切換。"));
+        Assert.That(preview.Message, Does.Not.Contain("原因代碼"));
+        if (!string.IsNullOrWhiteSpace(failureCode)) {
+            Assert.That(preview.Message, Does.Not.Contain(failureCode));
         }
-        Assert.That(preview.Message, Does.StartWith("Code Session 索引或 transcript 指標無法驗證，未開始切換。"));
-    }
-
-    [TestCase("history-source-binding-unknown", "無法確認來源帳號的 Code Session 歷史歸屬")]
-    [TestCase("source-directory-missing", "找不到來源帳號的 Code Session 資料")]
-    [TestCase("index-path-is-file", "Code Session 索引位置是檔案")]
-    [TestCase("source-index-too-large", "Code Session 索引項目過多")]
-    [TestCase("source-index-entry-unsupported", "Code Session 索引包含不支援的項目")]
-    [TestCase("source-index-json-invalid", "Code Session 索引格式無效")]
-    [TestCase("source-index-session-id-invalid", "Code Session 索引中的工作階段識別碼無效")]
-    [TestCase("source-path-unsafe", "Code Session 資料的位置未通過安全檢查")]
-    [TestCase("source-directory-unreadable", "無法讀取 Code Session 資料")]
-    [TestCase("source-unreadable", "無法讀取 Code Session 索引")]
-    [TestCase("transcript-root-unavailable", "無法取得 Code Session 紀錄的儲存位置")]
-    [TestCase("transcript-root-missing", "找不到 Code Session 紀錄的儲存位置")]
-    [TestCase("transcript-missing", "找不到索引指向的 Code Session 紀錄")]
-    [TestCase("transcript-not-unique", "索引指向多份 Code Session 紀錄")]
-    [TestCase("transcript-unreadable", "無法讀取索引指向的 Code Session 紀錄")]
-    [TestCase("transcript-root-unreadable", "無法讀取 Code Session 紀錄的儲存位置")]
-    public async Task PreviewSwitchAsync_KnownHistoryFailureCode_ShowsChineseExplanation(string failureCode, string expected) {
-        SwitchFixture fixture = CreateFixture(includeHistory: true);
-        fixture.HistoryStore!.ValidationOverride = new(
-            IClaudeSessionHistoryStore.ValidationStatus.MissingDirectory, 0, failureCode
-        );
-
-        ClaudeDesktopSwitchService.SwitchPreview preview = await fixture.Switches
-            .PreviewSwitchAsync(fixture.ProfileB.ProfileId, CancellationToken.None);
-
-        Assert.That(preview.CanProceed, Is.False);
-        Assert.That(preview.Message, Does.StartWith(expected));
-        Assert.That(preview.Message, Does.EndWith($"（原因代碼：{failureCode}）"));
     }
 
     [Test]
@@ -182,7 +167,7 @@ public sealed class ClaudeDesktopSwitchServiceTests {
 
         Assert.That(preview.CanProceed, Is.False);
         Assert.That(preview.Outcome, Is.EqualTo(ClaudeDesktopSwitchService.PreviewOutcome.TargetBindingMismatch));
-        Assert.That(preview.Message, Does.Contain("重新捕捉"));
+        Assert.That(preview.Message, Does.Contain("請重新保存此帳號"));
         Assert.That(fixture.Process.CloseCallCount, Is.Zero);
         Assert.That(fixture.HistoryStore!.Operations, Is.Empty);
     }
@@ -403,6 +388,8 @@ public sealed class ClaudeDesktopSwitchServiceTests {
             .SwitchAsync(preview, CancellationToken.None);
 
         Assert.That(result.Outcome, Is.EqualTo(ClaudeDesktopSwitchService.SwitchOutcome.RecoveryRequired));
+        Assert.That(result.Transaction!.FailureCode, Is.EqualTo("rollback:rollback_close_timeout"));
+        Assert.That(result.Message, Is.EqualTo("復原未完成：Claude Desktop 仍在執行或無法確認已結束，請先正常結束 Claude Desktop 後按「重試復原」。"));
         Assert.That(fixture.Process.CloseCallCount, Is.EqualTo(2));
         Assert.That(fixture.HistoryStore!.Operations, Does.Not.Contain("restore-history"));
         Assert.That(fixture.ProfileStore.RestoreCallCount, Is.Zero);
@@ -488,17 +475,68 @@ public sealed class ClaudeDesktopSwitchServiceTests {
         Assert.That(pageState.CurrentIdentity.Status, Is.EqualTo(ClaudeAccountService.IdentityStatus.RecoveryRequired));
     }
 
-    [Test]
-    public async Task RecoverPendingSwitchAsync_LocatorFails_PreservesFailureCode() {
+    [TestCase("desktop-not-stopped", "Claude Desktop 尚未完全結束，請先正常結束 Claude Desktop 後按「重試復原」。")]
+    [TestCase("running-installation-mismatch", "Claude Desktop 尚未完全結束，請先正常結束 Claude Desktop 後按「重試復原」。")]
+    [TestCase("source-changed", "Claude Desktop 尚未完全結束，請先正常結束 Claude Desktop 後按「重試復原」。")]
+    [TestCase("multiple-data-roots", "找到多份 Claude Desktop 安裝或資料，請確認只保留一份後按「重試復原」。")]
+    [TestCase("installation-id-mismatch", "找到多份 Claude Desktop 安裝或資料，請確認只保留一份後按「重試復原」。")]
+    [TestCase("data-layout-unknown", "Claude Desktop 的資料已變動，無法自動復原，原資料已保留。")]
+    [TestCase("local-state-changed", "Claude Desktop 的資料已變動，無法自動復原，原資料已保留。")]
+    [TestCase("data-root-changed", "Claude Desktop 的資料已變動，無法自動復原，原資料已保留。")]
+    [TestCase("binding-invalid", "Claude Desktop 的資料已變動，無法自動復原，原資料已保留。")]
+    [TestCase(
+        "source-identity-unknown",
+        "無法確認原 Claude Desktop 的來源，請確認使用切換時的 Windows 使用者登入，稍後按「重試復原」。"
+    )]
+    [TestCase("unrecognized-code", "無法確認原 Claude Desktop 安裝，請稍後按「重試復原」。")]
+    [TestCase(null, "無法確認原 Claude Desktop 安裝，請稍後按「重試復原」。")]
+    public async Task RecoverPendingSwitchAsync_LocatorFails_PreservesFailureCodeAndShowsActionableMessage(
+        string? locatorCode, string expectedMessage
+    ) {
         SwitchFixture fixture = CreateFixture(includeHistory: false);
         fixture.Repository.Transaction = CreatePendingRecoveryTransaction(fixture);
-        fixture.Locator.Result = new(IClaudeDesktopInstallationLocator.LocateStatus.Unknown, null, "local-state-changed");
+        fixture.Locator.Result = new(IClaudeDesktopInstallationLocator.LocateStatus.Unknown, null, locatorCode);
 
         ClaudeDesktopSwitchService.SwitchResult result = await fixture.Switches.RecoverPendingSwitchAsync(CancellationToken.None);
 
         Assert.That(result.Transaction!.CurrentStage, Is.EqualTo(ClaudeSwitchTransaction.Stage.RecoveryRequired));
-        Assert.That(result.Transaction.FailureCode, Is.EqualTo("installation_unavailable:local-state-changed"));
-        Assert.That(result.Message, Does.Contain("Local State 已變更"));
+        Assert.That(result.Transaction.FailureCode, Is.EqualTo($"installation_unavailable:{locatorCode ?? "unknown"}"));
+        Assert.That(result.Message, Is.EqualTo(expectedMessage));
+        if (locatorCode is not null) {
+            Assert.That(result.Message, Does.Not.Contain(locatorCode));
+        }
+    }
+
+    [TestCase("close-timeout", "rollback_close_timeout")]
+    [TestCase("still-running", "rollback_process_still_running")]
+    [TestCase("status-unknown", "process_status_unknown")]
+    public async Task RecoverPendingSwitchAsync_DesktopCannotBeStopped_ShowsCloseDesktopMessage(
+        string scenario, string expectedFailureCode
+    ) {
+        SwitchFixture fixture = CreateFixture(includeHistory: false);
+        fixture.Repository.Transaction = CreatePendingRecoveryTransaction(fixture);
+        switch (scenario) {
+            case "close-timeout":
+                fixture.Process.SetStatusSequence(IClaudeDesktopProcessController.ProcessStatus.Running);
+                fixture.Process.CloseResult = false;
+                break;
+            case "still-running":
+                fixture.Process.SetStatusSequence(
+                    IClaudeDesktopProcessController.ProcessStatus.Running,
+                    IClaudeDesktopProcessController.ProcessStatus.Running
+                );
+                break;
+            default:
+                fixture.Process.SetStatusSequence(IClaudeDesktopProcessController.ProcessStatus.Unknown);
+                break;
+        }
+
+        ClaudeDesktopSwitchService.SwitchResult result = await fixture.Switches.RecoverPendingSwitchAsync(CancellationToken.None);
+
+        Assert.That(result.Outcome, Is.EqualTo(ClaudeDesktopSwitchService.SwitchOutcome.RecoveryRequired));
+        Assert.That(result.Transaction!.FailureCode, Is.EqualTo(expectedFailureCode));
+        Assert.That(result.Message, Is.EqualTo("復原未完成：Claude Desktop 仍在執行或無法確認已結束，請先正常結束 Claude Desktop 後按「重試復原」。"));
+        Assert.That(result.Message, Does.Not.Contain(expectedFailureCode));
     }
 
     [Test]
@@ -624,7 +662,8 @@ public sealed class ClaudeDesktopSwitchServiceTests {
         ClaudeDesktopSwitchService.SwitchResult result = await fixture.Switches.RecoverPendingSwitchAsync(CancellationToken.None);
 
         Assert.That(result.Outcome, Is.EqualTo(ClaudeDesktopSwitchService.SwitchOutcome.CleanupPending));
-        Assert.That(result.Message, Does.Contain("cleanup:running-installation-mismatch"));
+        Assert.That(result.Message, Does.Contain("無法確認原 Claude Desktop 安裝"));
+        Assert.That(result.Message, Does.Not.Contain("cleanup:"));
     }
 
     [Test]
@@ -794,7 +833,8 @@ public sealed class ClaudeDesktopSwitchServiceTests {
 
         Assert.That(result.Transaction!.FailureCode, Is.EqualTo("rollback:rollback_binding_revalidation_failed"));
         Assert.That(fixture.Repository.Transaction!.FailureCode, Is.EqualTo(result.Transaction.FailureCode));
-        Assert.That(result.Message, Does.Contain("復原步驟失敗"));
+        Assert.That(result.Message, Is.EqualTo("復原未完成，請稍後重試；仍失敗時請保留 Claude Desktop 資料。"));
+        Assert.That(result.Message, Does.Not.Contain("rollback"));
     }
 
     [Test]
@@ -811,7 +851,8 @@ public sealed class ClaudeDesktopSwitchServiceTests {
         Assert.That(result.Transaction!.FailureCode, Is.EqualTo("rollback:IOException"));
         Assert.That(result.Transaction.FailureCode, Does.Not.Contain("Synthetic"));
         Assert.That(fixture.Repository.Transaction!.FailureCode, Is.EqualTo(result.Transaction.FailureCode));
-        Assert.That(result.Message, Does.Contain("IOException"));
+        Assert.That(result.Message, Does.Not.Contain("IOException"));
+        Assert.That(result.Message, Is.EqualTo("復原未完成，請稍後重試；仍失敗時請保留 Claude Desktop 資料。"));
     }
 
     [TestCase("source-revision", "rollback:source_profile_revision_changed")]

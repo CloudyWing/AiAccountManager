@@ -18,6 +18,7 @@ public sealed record DashboardOverviewSnapshot {
     /// <param name="RetrievedAtUtc">最近一次成功取得額度的時間。</param>
     /// <param name="Windows">該身分的額度視窗。</param>
     /// <param name="IsStale">額度資料是否為舊快照。</param>
+    /// <param name="PlanLabel">帳號方案的顯示名稱；沒有需要標示的方案時為 null。</param>
     public sealed record Provider(
         ProviderKind Kind,
         IdentityStatus IdentityStatus,
@@ -29,7 +30,8 @@ public sealed record DashboardOverviewSnapshot {
         DateTimeOffset? CheckedAtUtc,
         DateTimeOffset? RetrievedAtUtc,
         IReadOnlyList<QuotaWindow> Windows,
-        bool IsStale
+        bool IsStale,
+        string? PlanLabel = null
     );
 
     /// <summary>

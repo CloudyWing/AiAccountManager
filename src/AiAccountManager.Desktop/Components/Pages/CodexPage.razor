@@ -75,7 +75,7 @@
     <header class="page-heading">
         <MudText Typo="Typo.h4">Codex 帳號</MudText>
         <MudText Typo="Typo.body2" Class="mud-text-secondary">
-            切換 Codex Desktop 登入帳號，並以隔離的 Codex home 查詢各帳號額度。額度每 @(SettingsState.Settings?.QuotaRefreshIntervalMinutes ?? AppSettings.Defaults.QuotaRefreshIntervalMinutes) 分鐘自動刷新。
+            切換 Codex Desktop 登入帳號，並查看各帳號額度。額度每 @(SettingsState.Settings?.QuotaRefreshIntervalMinutes ?? AppSettings.Defaults.QuotaRefreshIntervalMinutes) 分鐘自動刷新。
         </MudText>
     </header>
 
@@ -170,7 +170,7 @@
         <MudPaper Elevation="0" Outlined="true" Class="content-card empty-state">
             <MudText Typo="Typo.h6">尚未加入 Codex 額度帳號</MudText>
             <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                額度只會在完成 Codex OAuth 並確認帳號身分後顯示。此處不使用範例帳號或模擬額度。
+                請先加入 Codex 額度帳號，才能查看額度。
             </MudText>
         </MudPaper>
     }
@@ -211,7 +211,7 @@
     <MudPaper Elevation="0" Outlined="true" Class="content-card add-account-card">
         <MudText Typo="Typo.h6">加入額度帳號</MudText>
         <MudText Typo="Typo.body2" Class="mud-text-secondary">
-            登入會在系統預設瀏覽器完成。認證資料使用此應用程式專屬的 Codex home 與 Windows keyring。
+            登入會在瀏覽器完成。
         </MudText>
         <MudTextField T="string" Label="帳號別名（選填）" Value="newAlias" ValueChanged="SetNewAlias" Disabled="isAdding || isSubmitting" />
         <div>
@@ -726,7 +726,7 @@
         } catch (Exception) {
             operationError = action switch {
                 DesktopAction.Capture => "無法保存 Codex Desktop 登入，請重新讀取後再試。",
-                DesktopAction.Recover => "無法還原 Codex Desktop 登入，交易紀錄已保留供重試。",
+                DesktopAction.Recover => "無法還原 Codex Desktop 登入，請稍後重試。",
                 _ => "Codex Desktop 切換未完成。若頁面顯示需要還原，請依提示還原 Desktop 登入。"
             };
         } finally {
@@ -859,15 +859,15 @@
             CodexLocalIdentityStatus.Loading => "正在讀取本機登入資料。",
             CodexLocalIdentityStatus.Matched => "本機登入資料唯一符合一筆已保存額度帳號。",
             CodexLocalIdentityStatus.Unmatched => "本機登入資料未對應已保存的額度帳號。",
-            CodexLocalIdentityStatus.Ambiguous => "本機登入資料對應到多筆額度帳號，未標記任何卡片。",
-            CodexLocalIdentityStatus.CatalogUnavailable => "無法讀取額度帳號清單，無法完成本機登入資料比對。",
+            CodexLocalIdentityStatus.Ambiguous => "本機登入資料對應到多筆額度帳號，無法判斷目前使用中的帳號。",
+            CodexLocalIdentityStatus.CatalogUnavailable => "無法讀取額度帳號清單，無法確認目前使用中的帳號。",
             CodexLocalIdentityStatus.FileMissing => "未找到本機登入資料。這不代表 Codex Desktop 已登出。",
-            CodexLocalIdentityStatus.InvalidFormat => "本機登入資料格式錯誤，未標記任何帳號。",
-            CodexLocalIdentityStatus.UnsupportedAuth => "本機登入資料格式不受支援，未標記任何帳號。",
-            CodexLocalIdentityStatus.IdentityUnavailable => "本機登入資料缺少可辨識的帳號資訊，未標記任何帳號。",
-            CodexLocalIdentityStatus.ConflictingClaims => "本機登入資料中的帳號資訊互相矛盾，未標記任何帳號。",
-            CodexLocalIdentityStatus.FileTooLarge => "本機登入資料超過安全讀取大小，未標記任何帳號。",
-            CodexLocalIdentityStatus.UnsafePath => "本機登入資料路徑不安全，未標記任何帳號。",
+            CodexLocalIdentityStatus.InvalidFormat
+                or CodexLocalIdentityStatus.UnsupportedAuth
+                or CodexLocalIdentityStatus.IdentityUnavailable
+                or CodexLocalIdentityStatus.ConflictingClaims
+                or CodexLocalIdentityStatus.FileTooLarge
+                or CodexLocalIdentityStatus.UnsafePath => "無法辨識目前的 Codex Desktop 登入，請重新讀取或重新登入。",
             CodexLocalIdentityStatus.SharingViolation => "本機登入資料目前無法讀取，請稍後重新讀取。",
             CodexLocalIdentityStatus.AccessDenied => "目前沒有權限讀取本機登入資料。",
             CodexLocalIdentityStatus.ChangedDuringRead => "本機登入資料在讀取期間持續變動，請重新讀取。",

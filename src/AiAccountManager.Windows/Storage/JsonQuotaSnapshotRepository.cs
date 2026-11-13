@@ -94,9 +94,7 @@ public sealed class JsonQuotaSnapshotRepository : IQuotaSnapshotRepository {
         }
 
         if (snapshot.LastSuccessfulSnapshot is QuotaSuccessfulSnapshot success
-            && (!IsUtc(success.RetrievedAtUtc)
-                || !IsValidWindow(success.FiveHour, 300)
-                || !IsValidWindow(success.Weekly, 10080))) {
+            && (!IsUtc(success.RetrievedAtUtc) || !HasValidWindows(success))) {
             return false;
         }
 
@@ -113,8 +111,20 @@ public sealed class JsonQuotaSnapshotRepository : IQuotaSnapshotRepository {
         return true;
     }
 
-    private static bool IsValidWindow(QuotaWindow window, int expectedDuration) {
-        return window.DurationMinutes == expectedDuration
+    private static bool HasValidWindows(QuotaSuccessfulSnapshot success) {
+        if (success.FreePlanWindow is not null) {
+            return success.FiveHour is null
+                && success.Weekly is null
+                && IsValidWindow(success.FreePlanWindow, QuotaWindowLabels.FreePlanMinutes);
+        }
+
+        return IsValidWindow(success.FiveHour, QuotaWindowLabels.FiveHourMinutes)
+            && IsValidWindow(success.Weekly, QuotaWindowLabels.WeeklyMinutes);
+    }
+
+    private static bool IsValidWindow(QuotaWindow? window, int expectedDuration) {
+        return window is not null
+            && window.DurationMinutes == expectedDuration
             && window.RemainingPercent is >= 0 and <= 100
             && (window.ResetsAtUtc is null || IsUtc(window.ResetsAtUtc.Value));
     }

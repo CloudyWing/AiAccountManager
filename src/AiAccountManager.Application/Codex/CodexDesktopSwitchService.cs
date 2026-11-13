@@ -217,7 +217,7 @@ public sealed class CodexDesktopSwitchService : IDisposable {
             }
 
             if (!IdentityMatches(authStore.Parse(targetContent), target)) {
-                return Failed(Outcome.TargetUnavailable, $"{DisplayName(target)} 的 Desktop 快照與帳號身分不符，請重新保存。");
+                return Failed(Outcome.TargetUnavailable, $"{DisplayName(target)} 的 Desktop 登入資料與帳號身分不符，請重新保存。");
             }
 
             ICodexDesktopAuthStore.ReadResult before = await authStore.ReadAsync(cancellationToken).ConfigureAwait(false);
@@ -324,7 +324,7 @@ public sealed class CodexDesktopSwitchService : IDisposable {
     private async Task<string?> ApplyTargetAsync(CodexAccountProfile target, byte[] targetContent) {
         // 已寫入交易紀錄後不再接受取消，避免停在 `auth.json` 與紀錄不一致的狀態。
         if (!await IsStoppedAsync(CancellationToken.None).ConfigureAwait(false)) {
-            return "寫入前偵測到 Codex Desktop 重新啟動，已停止切換。";
+            return "Codex Desktop 在切換期間重新啟動，已停止切換。";
         }
 
         try {
@@ -337,7 +337,7 @@ public sealed class CodexDesktopSwitchService : IDisposable {
         try {
             if (written.Status != CodexLocalAuthReadStatus.Success || written.Identity is null
                 || !IdentityMatches(written.Identity, target)) {
-                return "寫入後的 Codex Desktop 登入身分與目標帳號不符。";
+                return "切換後的登入身分與目標帳號不符。";
             }
         } finally {
             Clear(written.Content);
@@ -345,7 +345,7 @@ public sealed class CodexDesktopSwitchService : IDisposable {
         }
 
         if (!await IsStoppedAsync(CancellationToken.None).ConfigureAwait(false)) {
-            return "寫入期間偵測到 Codex Desktop 重新啟動。";
+            return "Codex Desktop 在切換期間重新啟動，已停止切換。";
         }
 
         return null;
@@ -361,7 +361,7 @@ public sealed class CodexDesktopSwitchService : IDisposable {
             await snapshotRepository.DeleteJournalAsync(CancellationToken.None).ConfigureAwait(false);
             return (true, "已還原切換前的登入。");
         } catch (Exception failure) when (failure is not OperationCanceledException) {
-            return (false, "自動還原失敗，交易紀錄已保留；請使用「還原 Desktop 登入」重試。");
+            return (false, "自動還原失敗，請使用「還原 Desktop 登入」重試。");
         }
     }
 

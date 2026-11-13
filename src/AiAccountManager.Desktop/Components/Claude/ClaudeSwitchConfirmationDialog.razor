@@ -37,7 +37,7 @@
                         @if (SourceSessionCount is int sourceSessionCount && TargetSessionCount is int targetSessionCount) {
                             <MudText Typo="Typo.body2">來源清單 @sourceSessionCount 個 Session，目標目前有 @targetSessionCount 個 Session。</MudText>
                         }
-                        <MudText Typo="Typo.body2">目標帳號的 Session 資料夾會整個換成來源帳號的內容，包含排程任務與封存紀錄；原內容會先備份，切換失敗時自動還原。共用 transcript 與 sidecar 檔案不會複製或改寫。</MudText>
+                        <MudText Typo="Typo.body2">目標帳號的 Session 清單會被完整取代，包含排程任務與封存紀錄；原內容會先備份，切換失敗時自動還原。</MudText>
                     </MudStack>
                 </MudAlert>
             } else {

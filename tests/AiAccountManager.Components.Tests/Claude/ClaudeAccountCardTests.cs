@@ -195,7 +195,7 @@ public sealed class ClaudeAccountCardTests : ComponentTestBase {
             Assert.That(labels[1], Does.StartWith("每週（全部），70% 剩餘"));
             Assert.That(labels[2], Does.StartWith("額度視窗（custom），100% 剩餘"));
             Assert.That(cut.Markup, Does.Contain("重設：未知"));
-            Assert.That(cut.Markup, Does.Not.Contain("尚未取得此帳號的額度快照。"));
+            Assert.That(cut.Markup, Does.Not.Contain("尚未取得此帳號的額度。"));
         });
     }
 
@@ -204,7 +204,7 @@ public sealed class ClaudeAccountCardTests : ComponentTestBase {
         IRenderedComponent<ClaudeAccountCard> cut = RenderCard();
 
         Assert.Multiple(() => {
-            Assert.That(cut.Markup, Does.Contain("尚未取得此帳號的額度快照。"));
+            Assert.That(cut.Markup, Does.Contain("尚未取得此帳號的額度。"));
             Assert.That(cut.FindAll(".quota-bar"), Is.Empty);
         });
     }

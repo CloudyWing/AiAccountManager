@@ -52,4 +52,21 @@ public sealed class AccountRecommendationServiceTests {
 
         Assert.That(result, Is.Null);
     }
+
+    [Test]
+    public void Recommend_FreePlanAccountsHaveNoStandardWindows_AreNeverCurrentOrCandidate() {
+        Guid currentId = Guid.NewGuid();
+        Guid freeId = Guid.NewGuid();
+        RecommendationAccount[] withFreeCandidate = [
+            new(currentId, "current", 10, 10, null, true),
+            new(freeId, "free", null, null, null, true)
+        ];
+        RecommendationAccount[] withFreeCurrent = [
+            new(freeId, "free", null, null, null, true),
+            new(Guid.NewGuid(), "candidate", 100, 100, null, true)
+        ];
+
+        Assert.That(new AccountRecommendationService().Recommend(currentId, withFreeCandidate), Is.Null);
+        Assert.That(new AccountRecommendationService().Recommend(freeId, withFreeCurrent), Is.Null);
+    }
 }

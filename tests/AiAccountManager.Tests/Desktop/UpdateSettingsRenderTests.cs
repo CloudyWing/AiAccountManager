@@ -47,9 +47,9 @@ public sealed class UpdateSettingsRenderTests {
         }
     }
 
-    [TestCase(null, "預設", UpdateFeedResolver.DefaultFeedUrl)]
-    [TestCase("https://updates.example.test/custom", "自訂", "https://updates.example.test/custom")]
-    public async Task Render_SavedFeed_ShowsEffectiveSource(string? feed, string label, string expected) {
+    [TestCase(null, "目前使用預設來源", UpdateFeedResolver.DefaultFeedUrl, false)]
+    [TestCase("https://updates.example.test/custom", "自訂", "https://updates.example.test/custom", true)]
+    public async Task Render_SavedFeed_ShowsEffectiveSource(string? feed, string label, string url, bool urlShown) {
         UpdateHarness harness = await UpdateHarness.CreateAsync(feed);
         using (harness.Scheduler) {
             await using ServiceProvider services = new ServiceCollection()
@@ -68,7 +68,11 @@ public sealed class UpdateSettingsRenderTests {
             });
 
             Assert.That(html, Does.Contain(label));
-            Assert.That(html, Does.Contain(expected));
+            if (urlShown) {
+                Assert.That(html, Does.Contain(url));
+            } else {
+                Assert.That(html, Does.Not.Contain(url));
+            }
             Assert.That(html, Does.Not.Contain("尚未設定更新來源"));
         }
     }

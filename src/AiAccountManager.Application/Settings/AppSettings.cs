@@ -75,7 +75,7 @@ public sealed record AppSettings(
                 || !string.Equals(feedUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
                 || string.IsNullOrWhiteSpace(feedUri.Host)
                 || !string.IsNullOrEmpty(feedUri.UserInfo))) {
-            error = "更新來源必須是未含帳密的絕對 HTTPS 網址。";
+            error = "更新來源必須是 HTTPS 網址，且不可包含帳號密碼。";
             return false;
         }
 

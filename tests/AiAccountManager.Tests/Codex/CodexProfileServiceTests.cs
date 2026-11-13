@@ -95,12 +95,12 @@ public sealed class CodexProfileServiceTests {
 
         Assert.That(
             exception?.Message,
-            Is.EqualTo("無法完成 Codex 登入。沒有保存帳號，請重試。原因：找不到 Codex app-server 執行檔。")
+            Is.EqualTo("找不到或無法啟動 Codex，帳號未保存，請確認已安裝 Codex。")
         );
     }
 
     [Test]
-    public async Task AddAsync_UnknownAppServerFailure_ShowsExceptionType() {
+    public async Task AddAsync_UnknownAppServerFailure_ShowsGenericMessageWithoutExceptionType() {
         Fixture fixture = new();
         fixture.SessionFactory.Failure = new InvalidOperationException("Sensitive app-server response.");
 
@@ -108,10 +108,8 @@ public sealed class CodexProfileServiceTests {
             async () => await fixture.Service.AddAsync(null, CancellationToken.None)
         );
 
-        Assert.That(
-            exception?.Message,
-            Is.EqualTo("無法完成 Codex 登入。沒有保存帳號，請重試。原因：InvalidOperationException。")
-        );
+        Assert.That(exception?.Message, Is.EqualTo("無法完成 Codex 登入，帳號未保存，請重試。"));
+        Assert.That(exception?.Message, Does.Not.Contain("InvalidOperationException"));
     }
 
     [Test]

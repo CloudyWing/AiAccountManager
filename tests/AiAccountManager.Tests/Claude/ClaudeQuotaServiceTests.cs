@@ -297,7 +297,7 @@ public sealed class ClaudeQuotaServiceTests {
         ClaudeQuotaSnapshot.View result = await service.RefreshAsync(Guid.NewGuid(), CancellationToken.None);
 
         Assert.That(result.Status, Is.EqualTo(ClaudeQuotaSnapshot.RefreshStatus.Error));
-        Assert.That(result.Message, Does.Contain("找不到指定的 Claude profile"));
+        Assert.That(result.Message, Does.Contain("找不到指定的 Claude 帳號"));
         Assert.That(quotaRepository.SaveCallCount, Is.Zero);
     }
 

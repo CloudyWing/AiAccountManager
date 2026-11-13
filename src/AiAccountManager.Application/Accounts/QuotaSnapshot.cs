@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace CloudyWing.AiAccountManager.Application.Accounts;
 
 /// <summary>
@@ -76,15 +78,23 @@ public sealed record QuotaWindow(
 /// 表示成功取得的額度快照。
 /// </summary>
 /// <param name="RetrievedAtUtc">取得時間，使用 UTC。</param>
-/// <param name="FiveHour">五小時額度範圍。</param>
-/// <param name="Weekly">每週額度範圍。</param>
+/// <param name="FiveHour">五小時額度範圍；免費方案為 null。</param>
+/// <param name="Weekly">每週額度範圍；免費方案為 null。</param>
 /// <param name="ResetCredits">重置券資料；未知時為 null。</param>
+/// <param name="FreePlanWindow">免費方案的單一額度範圍；非免費方案為 null。</param>
 public sealed record QuotaSuccessfulSnapshot(
     DateTimeOffset RetrievedAtUtc,
-    QuotaWindow FiveHour,
-    QuotaWindow Weekly,
-    ResetCreditSummary? ResetCredits = null
-);
+    QuotaWindow? FiveHour,
+    QuotaWindow? Weekly,
+    ResetCreditSummary? ResetCredits = null,
+    QuotaWindow? FreePlanWindow = null
+) {
+    /// <summary>
+    /// 取得一個值，用以指出快照是否屬於免費方案。
+    /// </summary>
+    [JsonIgnore]
+    public bool IsFreePlan => FreePlanWindow is not null;
+}
 
 /// <summary>
 /// 表示一次額度更新的結果。

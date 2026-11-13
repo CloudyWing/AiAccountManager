@@ -1,11 +1,10 @@
-using System.Globalization;
 using System.Text.Json;
 using CloudyWing.AiAccountManager.Application.Accounts;
 
 namespace CloudyWing.AiAccountManager.Application.Codex;
 
 /// <summary>
-/// 解析 Codex 額度回應中的五小時與每週額度。
+/// 解析 Codex 額度回應中的五小時與每週額度，以及免費方案的單一額度。
 /// </summary>
 public sealed class QuotaResponseParser {
     /// <summary>
@@ -48,6 +47,19 @@ public sealed class QuotaResponseParser {
             }
         }
 
+        if (IsFreePlanResponse(response, selected, out JsonElement freeWindow)) {
+            if (!TryParseWindow(
+                freeWindow,
+                QuotaWindowLabels.FreePlanMinutes,
+                out QuotaWindow? parsedFree,
+                out string? freeFailure
+            )) {
+                return QuotaParseResult.Invalid(freeFailure!);
+            }
+
+            return QuotaParseResult.SuccessFreePlan(parsedFree!) with { ResetCredits = ParseResetCredits(response) };
+        }
+
         Dictionary<int, QuotaWindow> windows = [];
         List<string> missing = [];
         bool unidentifiableWindow = false;
@@ -71,30 +83,12 @@ public sealed class QuotaResponseParser {
                 continue;
             }
 
-            if (!window.TryGetProperty("usedPercent", out JsonElement usedElement)
-                || usedElement.ValueKind != JsonValueKind.Number
-                || !usedElement.TryGetInt32(out int usedPercent)
-                || usedPercent is < 0 or > 100) {
-                return QuotaParseResult.Invalid("invalid-used-percent");
+            if (!TryParseWindow(window, duration, out QuotaWindow? parsedWindow, out string? failureCode)) {
+                return QuotaParseResult.Invalid(failureCode!);
             }
 
-            DateTimeOffset? resetsAt = null;
-            if (window.TryGetProperty("resetsAt", out JsonElement resetsElement)
-                && resetsElement.ValueKind != JsonValueKind.Null) {
-                if (resetsElement.ValueKind != JsonValueKind.Number
-                    || !resetsElement.TryGetInt64(out long unixSeconds)) {
-                    return QuotaParseResult.Invalid("invalid-reset-time");
-                }
-
-                try {
-                    resetsAt = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
-                } catch (ArgumentOutOfRangeException) {
-                    return QuotaParseResult.Invalid("invalid-reset-time");
-                }
-            }
-
-            if (!windows.TryAdd(duration, new QuotaWindow(duration, 100 - usedPercent, resetsAt))) {
-                return QuotaParseResult.Incomplete([NameForDuration(duration)], "duplicate-window");
+            if (!windows.TryAdd(duration, parsedWindow!)) {
+                return QuotaParseResult.Incomplete([QuotaWindowLabels.ForDuration(duration)], "duplicate-window");
             }
         }
 
@@ -181,12 +175,87 @@ public sealed class QuotaResponseParser {
         return true;
     }
 
-    private static string NameForDuration(int duration) {
-        return duration switch {
-            300 => "5 小時",
-            10080 => "每週",
-            _ => duration.ToString(CultureInfo.InvariantCulture) + " 分鐘"
-        };
+    private static bool IsFreePlanResponse(JsonElement response, JsonElement selected, out JsonElement primary) {
+        primary = default;
+        if (!string.Equals(ReadPlanType(response, selected), "free", StringComparison.OrdinalIgnoreCase)
+            || !selected.TryGetProperty("primary", out JsonElement candidate)
+            || candidate.ValueKind != JsonValueKind.Object
+            || !candidate.TryGetProperty("windowDurationMins", out JsonElement duration)
+            || duration.ValueKind != JsonValueKind.Number
+            || !duration.TryGetInt32(out int minutes)
+            || minutes != QuotaWindowLabels.FreePlanMinutes) {
+            return false;
+        }
+
+        // 免費方案只有單一額度範圍；secondary 有值時無法確認其意義，改走一般解析並標示為不完整。
+        if (selected.TryGetProperty("secondary", out JsonElement secondary)
+            && secondary.ValueKind != JsonValueKind.Null) {
+            return false;
+        }
+
+        primary = candidate;
+        return true;
+    }
+
+    private static string? ReadPlanType(JsonElement response, JsonElement selected) {
+        if (TryReadPlanType(selected, out string? planType)) {
+            return planType;
+        }
+
+        if (response.TryGetProperty("rateLimits", out JsonElement legacy)
+            && legacy.ValueKind == JsonValueKind.Object
+            && TryReadPlanType(legacy, out planType)) {
+            return planType;
+        }
+
+        return TryReadPlanType(response, out planType) ? planType : null;
+    }
+
+    private static bool TryReadPlanType(JsonElement element, out string? planType) {
+        planType = null;
+        if (!element.TryGetProperty("planType", out JsonElement property) || property.ValueKind != JsonValueKind.String) {
+            return false;
+        }
+
+        planType = property.GetString();
+        return !string.IsNullOrWhiteSpace(planType);
+    }
+
+    private static bool TryParseWindow(
+        JsonElement window,
+        int duration,
+        out QuotaWindow? parsed,
+        out string? failureCode
+    ) {
+        parsed = null;
+        failureCode = null;
+        if (!window.TryGetProperty("usedPercent", out JsonElement usedElement)
+            || usedElement.ValueKind != JsonValueKind.Number
+            || !usedElement.TryGetInt32(out int usedPercent)
+            || usedPercent is < 0 or > 100) {
+            failureCode = "invalid-used-percent";
+            return false;
+        }
+
+        DateTimeOffset? resetsAt = null;
+        if (window.TryGetProperty("resetsAt", out JsonElement resetsElement)
+            && resetsElement.ValueKind != JsonValueKind.Null) {
+            if (resetsElement.ValueKind != JsonValueKind.Number
+                || !resetsElement.TryGetInt64(out long unixSeconds)) {
+                failureCode = "invalid-reset-time";
+                return false;
+            }
+
+            try {
+                resetsAt = DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+            } catch (ArgumentOutOfRangeException) {
+                failureCode = "invalid-reset-time";
+                return false;
+            }
+        }
+
+        parsed = new QuotaWindow(duration, 100 - usedPercent, resetsAt);
+        return true;
     }
 }
 
@@ -195,7 +264,7 @@ public sealed class QuotaResponseParser {
 /// </summary>
 public enum QuotaParseStatus {
     /// <summary>
-    /// 兩個額度時間範圍皆已取得。
+    /// 額度時間範圍皆已取得：五小時與每週，或免費方案的單一範圍。
     /// </summary>
     Complete,
     /// <summary>
@@ -212,8 +281,8 @@ public enum QuotaParseStatus {
 /// 表示額度回應的解析狀態與資料。
 /// </summary>
 /// <param name="Status">解析狀態。</param>
-/// <param name="FiveHour">五小時額度範圍。</param>
-/// <param name="Weekly">每週額度範圍。</param>
+/// <param name="FiveHour">五小時額度範圍；免費方案為 null。</param>
+/// <param name="Weekly">每週額度範圍；免費方案為 null。</param>
 /// <param name="MissingWindows">缺少的額度時間範圍。</param>
 /// <param name="FailureCode">失敗代碼。</param>
 public sealed record QuotaParseResult(
@@ -225,6 +294,12 @@ public sealed record QuotaParseResult(
 ) {
     /// <summary>取得解析後的重置券資料。</summary>
     public ResetCreditSummary? ResetCredits { get; init; }
+
+    /// <summary>
+    /// 取得免費方案的單一額度範圍；非免費方案為 null。
+    /// </summary>
+    public QuotaWindow? FreePlanWindow { get; init; }
+
     /// <summary>
     /// 建立完整的解析結果。
     /// </summary>
@@ -233,6 +308,15 @@ public sealed record QuotaParseResult(
     /// <returns>包含兩個額度範圍的結果。</returns>
     public static QuotaParseResult Success(QuotaWindow fiveHour, QuotaWindow weekly) {
         return new QuotaParseResult(QuotaParseStatus.Complete, fiveHour, weekly, [], null);
+    }
+
+    /// <summary>
+    /// 建立免費方案的完整解析結果。
+    /// </summary>
+    /// <param name="freePlanWindow">免費方案的單一額度範圍。</param>
+    /// <returns>只包含免費方案額度範圍的結果。</returns>
+    public static QuotaParseResult SuccessFreePlan(QuotaWindow freePlanWindow) {
+        return new QuotaParseResult(QuotaParseStatus.Complete, null, null, [], null) { FreePlanWindow = freePlanWindow };
     }
 
     /// <summary>

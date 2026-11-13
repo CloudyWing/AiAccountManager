@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CloudyWing.AiAccountManager.Application.Accounts;
 using CloudyWing.AiAccountManager.Application.Codex;
 using NUnit.Framework;
 
@@ -159,6 +160,131 @@ public sealed class QuotaResponseParserTests {
 
         Assert.That(result.Status, Is.EqualTo(QuotaParseStatus.Invalid));
         Assert.That(result.FailureCode, Is.EqualTo("limit-id-mismatch"));
+    }
+
+    private const string FreePlanResponse = """
+        {
+          "ordinaryUsageAllowed": true,
+          "rateLimits": {
+            "limitId": "codex",
+            "primary": { "usedPercent": 1, "windowDurationMins": 43200, "resetsAt": 1796893535 },
+            "secondary": null,
+            "credits": { "hasCredits": false, "unlimited": false, "balance": null },
+            "planType": "free",
+            "rateLimitReachedType": null
+          },
+          "rateLimitsByLimitId": {
+            "codex": {
+              "limitId": "codex",
+              "primary": { "usedPercent": 1, "windowDurationMins": 43200, "resetsAt": 1796893535 },
+              "secondary": null,
+              "planType": "free",
+              "rateLimitReachedType": null
+            }
+          },
+          "rateLimitResetCredits": { "availableCount": 0, "credits": [] }
+        }
+        """;
+
+    [Test]
+    public void FreePlanResponseParsesThirtyDayWindow() {
+        QuotaParseResult result = Parse(FreePlanResponse);
+
+        using (Assert.EnterMultipleScope()) {
+            Assert.That(result.Status, Is.EqualTo(QuotaParseStatus.Complete));
+            Assert.That(result.FiveHour, Is.Null);
+            Assert.That(result.Weekly, Is.Null);
+            Assert.That(result.FreePlanWindow?.DurationMinutes, Is.EqualTo(43200));
+            Assert.That(result.FreePlanWindow?.RemainingPercent, Is.EqualTo(99));
+            Assert.That(result.FreePlanWindow?.ResetsAtUtc, Is.EqualTo(DateTimeOffset.FromUnixTimeSeconds(1796893535)));
+            Assert.That(result.ResetCredits?.AvailableCount, Is.Zero);
+        }
+    }
+
+    [Test]
+    public void FreePlanTypeOnlyInLegacyRateLimitsStillParses() {
+        QuotaParseResult result = Parse("""
+            {"rateLimits":{"limitId":null,"planType":"free",
+             "primary":{"usedPercent":30,"windowDurationMins":43200},"secondary":null}}
+            """);
+
+        Assert.That(result.Status, Is.EqualTo(QuotaParseStatus.Complete));
+        Assert.That(result.FreePlanWindow?.RemainingPercent, Is.EqualTo(70));
+        Assert.That(result.FreePlanWindow?.ResetsAtUtc, Is.Null);
+    }
+
+    [TestCase(10080)]
+    [TestCase(300)]
+    [TestCase(1440)]
+    public void FreePlanTypeWithOtherWindowDurationRemainsIncomplete(int duration) {
+        QuotaParseResult result = Parse($$$"""
+            {"rateLimits":{"limitId":"codex","planType":"free",
+             "primary":{"usedPercent":1,"windowDurationMins":{{{duration}}}},"secondary":null}}
+            """);
+
+        using (Assert.EnterMultipleScope()) {
+            Assert.That(result.Status, Is.EqualTo(QuotaParseStatus.Incomplete));
+            Assert.That(result.FreePlanWindow, Is.Null);
+            Assert.That(result.FailureCode, Is.EqualTo("quota-window-incomplete"));
+        }
+    }
+
+    [Test]
+    public void FreePlanTypeWithSecondaryWindowRemainsIncomplete() {
+        QuotaParseResult result = Parse("""
+            {"rateLimits":{"limitId":"codex","planType":"free",
+             "primary":{"usedPercent":1,"windowDurationMins":43200},
+             "secondary":{"usedPercent":1,"windowDurationMins":10080}}}
+            """);
+
+        Assert.That(result.Status, Is.EqualTo(QuotaParseStatus.Incomplete));
+        Assert.That(result.FreePlanWindow, Is.Null);
+    }
+
+    [TestCase("plus")]
+    [TestCase(null)]
+    public void ThirtyDayWindowWithoutFreePlanTypeRemainsIncomplete(string? planType) {
+        string planTypeJson = planType is null ? "null" : $"\"{planType}\"";
+
+        QuotaParseResult result = Parse($$$"""
+            {"rateLimits":{"limitId":"codex","planType":{{{planTypeJson}}},
+             "primary":{"usedPercent":1,"windowDurationMins":43200},"secondary":null}}
+            """);
+
+        Assert.That(result.Status, Is.EqualTo(QuotaParseStatus.Incomplete));
+        Assert.That(result.FreePlanWindow, Is.Null);
+    }
+
+    [Test]
+    public void FreePlanWithInvalidUsedPercentIsInvalid() {
+        QuotaParseResult result = Parse("""
+            {"rateLimits":{"limitId":"codex","planType":"free",
+             "primary":{"usedPercent":101,"windowDurationMins":43200},"secondary":null}}
+            """);
+
+        Assert.That(result.Status, Is.EqualTo(QuotaParseStatus.Invalid));
+        Assert.That(result.FailureCode, Is.EqualTo("invalid-used-percent"));
+    }
+
+    [Test]
+    public void PlusPlanResponseKeepsFiveHourAndWeeklyWindows() {
+        QuotaParseResult result = Parse("""
+            {"rateLimits":{"limitId":"codex","planType":"plus",
+             "primary":{"usedPercent":20,"windowDurationMins":300,"resetsAt":1900000000},
+             "secondary":{"usedPercent":35,"windowDurationMins":10080,"resetsAt":1900000100}}}
+            """);
+
+        using (Assert.EnterMultipleScope()) {
+            Assert.That(result.Status, Is.EqualTo(QuotaParseStatus.Complete));
+            Assert.That(result.FiveHour, Is.EqualTo(new QuotaWindow(300, 80, DateTimeOffset.FromUnixTimeSeconds(1900000000))));
+            Assert.That(result.Weekly, Is.EqualTo(new QuotaWindow(10080, 65, DateTimeOffset.FromUnixTimeSeconds(1900000100))));
+            Assert.That(result.FreePlanWindow, Is.Null);
+        }
+    }
+
+    private QuotaParseResult Parse(string json) {
+        using JsonDocument document = JsonDocument.Parse(json);
+        return parser.Parse(document.RootElement);
     }
 
     private QuotaParseResult ParseFixture(string fileName) {

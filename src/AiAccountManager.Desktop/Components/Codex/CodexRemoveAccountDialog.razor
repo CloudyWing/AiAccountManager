@@ -6,7 +6,7 @@
                 <MudText Typo="Typo.subtitle1">@(string.IsNullOrWhiteSpace(Account.Alias) ? Account.MaskedIdentity : Account.Alias)</MudText>
                 <MudText Typo="Typo.body2" Class="mud-text-secondary">身分：@Account.MaskedIdentity</MudText>
                 <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
-                    確認後會移除此額度 profile，並清除此 profile 專屬的 Codex keyring 認證與 CODEX_HOME。
+                    確認後會移除此帳號與其在本工具保存的登入資料。
                 </MudAlert>
             }
         </MudStack>

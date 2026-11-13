@@ -35,7 +35,7 @@
             <MudStack Spacing="2">
                 <MudText Typo="Typo.h6">正在讀取 Claude Desktop 帳號</MudText>
                 <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-                <MudText Typo="Typo.body2" Class="mud-text-secondary">正在檢查本機 Desktop profile 與已保存帳號。</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">正在檢查 Claude Desktop 與已保存帳號。</MudText>
             </MudStack>
         </MudPaper>
     } else if (pageState is not null) {
@@ -72,10 +72,6 @@
                     <summary>辨識明細</summary>
                     <dl class="account-detail-list">
                         <div>
-                            <dt>辨識來源</dt>
-                            <dd>本機 Claude Desktop 設定與 profile API</dd>
-                        </div>
-                        <div>
                             <dt>身分</dt>
                             <dd>@(string.IsNullOrWhiteSpace(pageState.CurrentIdentity.MaskedEmail) ? "未知" : pageState.CurrentIdentity.MaskedEmail)</dd>
                         </div>
@@ -92,7 +88,7 @@
                             </div>
                         }
                         <div>
-                            <dt>身分證據時間</dt>
+                            <dt>最近驗證時間</dt>
                             <dd>@FormatDateTime(pageState.CurrentIdentity.VerifiedAtUtc)</dd>
                         </div>
                     </dl>
@@ -101,22 +97,7 @@
                 @if (IsRecoveryRequired) {
                     <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">
                         <MudStack Spacing="2">
-                            <MudText Typo="Typo.body2">偵測到尚未完成的切換交易。復原完成前會停用 profile 保存與新切換。</MudText>
-                            @if (pageState.PendingTransaction is ClaudeSwitchTransaction transaction) {
-                                <details>
-                                    <summary>交易識別與復原資訊</summary>
-                                    <MudStack Spacing="1" Class="mud-pt-2">
-                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">交易 ID：@FormatIdentifier(transaction.TransactionId.ToString("N"))</MudText>
-                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">來源 profile：@FormatIdentifier(transaction.SourceProfileId.ToString("N"))</MudText>
-                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">目標 profile：@FormatIdentifier(transaction.TargetProfileId.ToString("N"))</MudText>
-                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">交易階段：@transaction.CurrentStage</MudText>
-                                        @if (!string.IsNullOrWhiteSpace(transaction.FailureCode)) {
-                                            <MudText Typo="Typo.caption" Class="mud-text-secondary">狀態碼：@transaction.FailureCode</MudText>
-                                        }
-                                        <MudText Typo="Typo.caption" Class="mud-text-secondary">最近更新：@FormatDateTime(transaction.UpdatedAtUtc)</MudText>
-                                    </MudStack>
-                                </details>
-                            }
+                            <MudText Typo="Typo.body2">偵測到尚未完成的帳號切換。復原完成前無法保存帳號或開始新切換。</MudText>
                             <MudButton Color="Color.Error" Variant="Variant.Text" Disabled="@(isBusy || !hasLoadedPage)" OnClick="RecoverPendingSwitchAsync">
                                 @(isBusy && activeAction == PageAction.Recover ? "正在復原…" : "重試復原")
                             </MudButton>
@@ -127,10 +108,7 @@
                 @if (IsCleanupPending) {
                     <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
                         <MudStack Spacing="2">
-                            <MudText Typo="Typo.body2">帳號切換已完成，僅待清理這筆交易的 history 暫存。清理期間不會回復目標帳號，也不能開始新切換。</MudText>
-                            @if (pageState.PendingTransaction is ClaudeSwitchTransaction transaction) {
-                                <MudText Typo="Typo.caption" Class="mud-text-secondary">交易 ID：@FormatIdentifier(transaction.TransactionId.ToString("N"))</MudText>
-                            }
+                            <MudText Typo="Typo.body2">帳號切換已完成，尚有暫存資料待清理。清理完成前無法開始新切換。</MudText>
                             <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(isBusy || !hasLoadedPage)" OnClick="RecoverPendingSwitchAsync">
                                 @(isBusy && activeAction == PageAction.Recover ? "正在清理…" : "重試暫存清理")
                             </MudButton>
@@ -153,7 +131,7 @@
             <MudPaper Elevation="0" Outlined="true" Class="content-card empty-state">
                 <MudText Typo="Typo.h6">尚未保存 Claude Desktop 帳號</MudText>
                 <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                    請先在 Claude Desktop 登入，再保存目前帳號。系統只會保存經 profile API 驗證的 Desktop 身分。
+                    請先在 Claude Desktop 登入，再保存目前帳號。
                 </MudText>
             </MudPaper>
         } else {
@@ -186,7 +164,6 @@
                                    ResetGrants="@(quota?.Status == ClaudeQuotaSnapshot.RefreshStatus.Fresh ? quota.Snapshot?.ResetGrants : null)"
                                    QuotaMessageSeverity="@QuotaMessageSeverity(quota?.Status)"
                                    QuotaMessage="@GetQuotaMessage(quota)"
-                                   QuotaSourceText="@GetProfileDisplayName(profile)"
                                    QuotaCheckedAtText="@GetQuotaCheckedAtText(quota)"
                                    QuotaUpdatedAt="@(quota?.Snapshot?.RetrievedAtUtc)"
                                    CanRefreshQuota="@CanRefreshQuota(profile)"
@@ -209,7 +186,7 @@
         <MudPaper Elevation="0" Outlined="true" Class="content-card add-account-card">
             <MudText Typo="Typo.h6">保存目前 Desktop 帳號</MudText>
             <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                在 Claude Desktop 登入要加入的帳號並正常結束程式，再保存其登入快照。快照以目前 Windows 使用者的 DPAPI 保護。
+                在 Claude Desktop 登入要加入的帳號並正常結束程式，再保存目前帳號。
             </MudText>
             <MudTextField T="string"
                           Label="帳號別名（選填）"
@@ -296,13 +273,13 @@
     private bool IsCleanupPending => pageState?.CleanupPending == true;
 
     private string ActiveActionText => activeAction switch {
-        PageAction.Capture => "正在保存並驗證目前 Claude Desktop profile。",
+        PageAction.Capture => "正在保存目前 Claude Desktop 帳號。",
         PageAction.RefreshQuota => "正在查詢所選已保存帳號的 Claude 額度。",
         PageAction.PreviewSwitch => "正在檢查切換來源、目標與 Session 覆蓋範圍。",
         PageAction.Switch => SwitchProgressMessage,
         PageAction.Recover => IsCleanupPending
-            ? "正在清理已提交切換的交易暫存。"
-            : "正在復原未完成的 Claude Desktop 切換交易。",
+            ? "正在清理切換後的暫存資料。"
+            : "正在復原未完成的 Claude Desktop 帳號切換。",
         PageAction.Catalog => "正在保存 Claude 帳號清單。",
         _ => "正在讀取 Claude Desktop 狀態。"
     };
@@ -344,7 +321,7 @@
             : null;
 
     private string? RecoveryMessage => IsRecoveryRequired
-        ? "此交易尚未完成復原。請使用「重試復原」完成 rollback；復原成功前不會開始新切換。"
+        ? "切換尚未完成復原。請按「重試復原」；復原成功前無法開始新切換。"
         : null;
 
     protected override async Task OnInitializedAsync() {
@@ -609,8 +586,8 @@
                 PageAction.Capture => "無法保存目前 Claude Desktop 帳號，請確認本機身分後重試。",
                 PageAction.RefreshQuota => "無法查詢此 Claude 帳號的額度，請稍後再試。",
                 PageAction.PreviewSwitch => "無法預覽帳號切換，請重新載入後再試。",
-                PageAction.Switch => "切換作業未完成。請檢查交易狀態，必要時使用復原入口。",
-                PageAction.Recover => "無法完成切換復原，交易資料仍保留供下次重試。",
+                PageAction.Switch => "切換作業未完成。請確認目前狀態，必要時使用復原入口。",
+                PageAction.Recover => "無法完成切換復原，請稍後重試。",
                 PageAction.Catalog => "無法保存 Claude 帳號清單的變更，請重新載入後再試。",
                 _ => "Claude 操作失敗，請重新載入後再試。"
             };
@@ -653,7 +630,7 @@
                     null,
                     ClaudeQuotaSnapshot.RefreshStatus.Error,
                     null,
-                    "無法載入此帳號的額度快照。"
+                    "無法載入此帳號的額度資料。"
                 );
             }
         }
@@ -727,7 +704,7 @@
     }
 
     private static string GetProfileEvidenceText(ClaudeAccountProfile profile) {
-        return $"最近驗證：{FormatDateTime(profile.LastVerifiedAtUtc)}";
+        return FormatDateTime(profile.LastVerifiedAtUtc);
     }
 
     private static Color IdentityStatusColor(ClaudeAccountService.IdentityStatus status) {
@@ -753,12 +730,12 @@
 
     private static string IdentityStatusMessage(ClaudeAccountService.IdentityStatus status) {
         return status switch {
-            ClaudeAccountService.IdentityStatus.Verified => "目前身分已由 Claude Desktop 設定與 profile API 相互確認。",
+            ClaudeAccountService.IdentityStatus.Verified => "目前 Claude Desktop 身分已確認。",
             ClaudeAccountService.IdentityStatus.ReauthenticationRequired => "目前 Desktop 認證需要重新驗證。請先在 Claude Desktop 完成登入，再重新讀取身分。",
-            ClaudeAccountService.IdentityStatus.Mismatch => "本機帳號識別資料與 profile API 回應不一致，因此無法安全切換。",
+            ClaudeAccountService.IdentityStatus.Mismatch => "本機帳號與線上帳號資料不一致，因此無法安全切換。",
             ClaudeAccountService.IdentityStatus.UnsupportedInstallation => "找不到受支援的 Claude Desktop 安裝。",
             ClaudeAccountService.IdentityStatus.AmbiguousInstallation => "找到多個 Claude Desktop 安裝位置，請先處理安裝歧義。",
-            ClaudeAccountService.IdentityStatus.RecoveryRequired => "有未完成的切換交易，需要先完成復原。",
+            ClaudeAccountService.IdentityStatus.RecoveryRequired => "有尚未完成的帳號切換，需要先完成復原。",
             _ => "尚未取得可驗證的 Claude Desktop 身分。"
         };
     }
@@ -791,7 +768,7 @@
         return status switch {
             ClaudeQuotaSnapshot.RefreshStatus.Refreshing => "查詢中",
             ClaudeQuotaSnapshot.RefreshStatus.Fresh => "最新",
-            ClaudeQuotaSnapshot.RefreshStatus.Stale => "快照過期",
+            ClaudeQuotaSnapshot.RefreshStatus.Stale => "資料過期",
             ClaudeQuotaSnapshot.RefreshStatus.ReauthenticationRequired => "需要重新驗證",
             ClaudeQuotaSnapshot.RefreshStatus.Error => "查詢失敗",
             ClaudeQuotaSnapshot.RefreshStatus.Incomplete => "資料不完整",
@@ -822,8 +799,8 @@
     private static string? GetQuotaCheckedAtText(ClaudeQuotaSnapshot.View? quota) {
         if (quota?.Snapshot is ClaudeQuotaSnapshot snapshot) {
             return quota.Status == ClaudeQuotaSnapshot.RefreshStatus.Fresh
-                ? $"額度快照時間：{FormatDateTime(snapshot.RetrievedAtUtc)}"
-                : $"最近成功快照：{FormatDateTime(snapshot.RetrievedAtUtc)}";
+                ? $"額度更新時間：{FormatDateTime(snapshot.RetrievedAtUtc)}"
+                : $"最近成功更新：{FormatDateTime(snapshot.RetrievedAtUtc)}";
         }
 
         return quota?.LastAttemptAtUtc is DateTimeOffset lastAttemptAtUtc
@@ -880,11 +857,11 @@
 
     private string? SwitchDisabledReason(ClaudeAccountProfile profile) {
         if (IsRecoveryRequired) {
-            return "先完成待復原交易，才能開始新切換。";
+            return "請先完成待復原的切換，才能開始新切換。";
         }
 
         if (IsCleanupPending) {
-            return "切換已完成，請先重試清理交易暫存，再開始新切換。";
+            return "切換已完成，請先重試清理暫存資料，再開始新切換。";
         }
 
         if (profile.Status != ClaudeAccountProfile.VerificationStatus.Verified) {
@@ -921,7 +898,7 @@
             }
 
             if (IsRecoveryRequired) {
-                return "先完成待復原交易，才能保存或更新 profile。";
+                return "請先完成待復原的切換，才能保存帳號。";
             }
 
             if (pageState?.ProcessStatus == IClaudeDesktopProcessController.ProcessStatus.Running) {
@@ -935,8 +912,8 @@
             return pageState?.CurrentIdentity.Status switch {
                 ClaudeAccountService.IdentityStatus.ReauthenticationRequired => "請先在 Claude Desktop 重新登入，再重新讀取身分。",
                 ClaudeAccountService.IdentityStatus.Mismatch => "身分資料不一致，為避免保存錯誤帳號，已停用此操作。",
-                ClaudeAccountService.IdentityStatus.UnsupportedInstallation => "目前 Claude Desktop 安裝不受支援，無法保存 profile。",
-                ClaudeAccountService.IdentityStatus.AmbiguousInstallation => "目前找到多個安裝位置，無法安全保存 profile。",
+                ClaudeAccountService.IdentityStatus.UnsupportedInstallation => "目前 Claude Desktop 安裝不受支援，無法保存帳號。",
+                ClaudeAccountService.IdentityStatus.AmbiguousInstallation => "目前找到多個安裝位置，無法安全保存帳號。",
                 _ => null
             };
         }
@@ -947,8 +924,8 @@
             (ClaudeDesktopSwitchService.SwitchOutcome.Succeeded, false) => "Claude Desktop 已切換至目標帳號。",
             (ClaudeDesktopSwitchService.SwitchOutcome.Succeeded, true) => "切換復原已完成。",
             (ClaudeDesktopSwitchService.SwitchOutcome.FailedRolledBack, _) => "切換失敗，原帳號設定已復原。",
-            (ClaudeDesktopSwitchService.SwitchOutcome.RecoveryRequired, _) => "切換尚未完成，交易資料已保留。請重試復原。",
-            (ClaudeDesktopSwitchService.SwitchOutcome.CleanupPending, _) => "帳號切換已完成，交易暫存清理待重試。",
+            (ClaudeDesktopSwitchService.SwitchOutcome.RecoveryRequired, _) => "切換尚未完成，請重試復原。",
+            (ClaudeDesktopSwitchService.SwitchOutcome.CleanupPending, _) => "帳號切換已完成，暫存資料待清理，請稍後重試。",
             (ClaudeDesktopSwitchService.SwitchOutcome.Blocked, _) => "目前狀態不允許執行此作業。",
             _ => "切換未執行，請重新載入狀態後再試。"
         };
@@ -974,7 +951,7 @@
     private bool CanEditCatalog => hasLoadedPage && !isBusy && !IsRecoveryRequired && !IsCleanupPending;
 
     private string? CatalogDisabledReason => IsRecoveryRequired || IsCleanupPending
-        ? "有尚未完成的切換交易，完成復原或清理前無法變更帳號清單。"
+        ? "有尚未完成的帳號切換，完成復原或清理前無法變更帳號清單。"
         : null;
 
     private async Task UpdateAliasAsync(ClaudeAccountProfile profile, string? alias) {

@@ -111,7 +111,7 @@ public sealed class CodexProfileService {
                 .ConfigureAwait(false);
             loginCompleted = completion.Succeeded;
             if (!completion.Succeeded) {
-                throw new CodexProfileOperationException("Codex OAuth 未完成，帳號沒有保存。請重試。", null);
+                throw new CodexProfileOperationException("Codex 登入未完成，帳號沒有保存，請重試。", null);
             }
 
             CodexAccountRead account = await session.ReadAccountAsync(refreshToken: true, cancellationToken)
@@ -135,7 +135,7 @@ public sealed class CodexProfileService {
 
             if (await profileStorage.RemoveUnexpectedAuthFileAsync(accountId, cancellationToken).ConfigureAwait(false)) {
                 throw new CodexProfileOperationException(
-                    "隔離的 Codex home 出現 auth.json；已移除明文檔並拒絕保存帳號。請重試登入。",
+                    "登入資料處理失敗，帳號未保存，請重試。",
                     null
                 );
             }
@@ -191,7 +191,7 @@ public sealed class CodexProfileService {
             ).ConfigureAwait(false);
             if (cleanupFailure is not null) {
                 throw new CodexProfileOperationException(
-                    "Codex 登入已取消，但隔離資料清理尚未完成；journal 已保留，請重試清理。",
+                    "Codex 登入已取消，帳號未保存，請重新載入後重試。",
                     cleanupFailure
                 );
             }
@@ -209,7 +209,7 @@ public sealed class CodexProfileService {
             ).ConfigureAwait(false);
             if (cleanupFailure is not null) {
                 throw new CodexProfileOperationException(
-                    failure.Message + " 隔離資料清理尚未完成；journal 已保留。",
+                    failure.Message,
                     cleanupFailure
                 );
             }
@@ -219,7 +219,7 @@ public sealed class CodexProfileService {
             if (catalogCommitted) {
                 StateChanged?.Invoke(this, EventArgs.Empty);
                 throw new CodexProfileOperationException(
-                    "Codex 帳號已保存，但交易 journal 清理未完成。請重新載入帳號清單。",
+                    "Codex 帳號已保存，但後續處理未完成。請重新載入帳號清單。",
                     failure
                 );
             }
@@ -232,11 +232,7 @@ public sealed class CodexProfileService {
                 loginId,
                 session
             ).ConfigureAwait(false);
-            string reason = GetAddFailureReason(failure);
-            string message = cleanupFailure is null
-                ? "無法完成 Codex 登入。沒有保存帳號，請重試。原因：" + reason + "。"
-                : "無法完成 Codex 登入；隔離資料清理尚未完成，journal 已保留。原因：" + reason + "。";
-            throw new CodexProfileOperationException(message, cleanupFailure ?? failure);
+            throw new CodexProfileOperationException(GetAddFailureMessage(failure), cleanupFailure ?? failure);
         } finally {
             if (session is not null) {
                 await session.DisposeAsync().ConfigureAwait(false);
@@ -244,13 +240,12 @@ public sealed class CodexProfileService {
         }
     }
 
-    private static string GetAddFailureReason(Exception failure) {
+    private static string GetAddFailureMessage(Exception failure) {
         return failure switch {
-            FileNotFoundException => "找不到 Codex app-server 執行檔",
-            InvalidDataException => "Codex app-server 執行檔驗證失敗",
-            TimeoutException => "等待 Codex 回應逾時",
-            Win32Exception => "無法啟動 Codex app-server",
-            _ => failure.GetType().Name
+            FileNotFoundException or InvalidDataException or Win32Exception
+                => "找不到或無法啟動 Codex，帳號未保存，請確認已安裝 Codex。",
+            TimeoutException => "等待 Codex 回應逾時，帳號未保存，請重試。",
+            _ => "無法完成 Codex 登入，帳號未保存，請重試。"
         };
     }
 
@@ -387,7 +382,7 @@ public sealed class CodexProfileService {
 
             if (pendingRemoval.Stage != "home-removed") {
                 throw new CodexProfileOperationException(
-                    "Codex 帳號已不在清單中，但移除 journal 尚未到達可安全清除的階段；隔離資料與 journal 已保留。",
+                    "帳號未移除，請重新載入後重試。",
                     null
                 );
             }
@@ -421,7 +416,7 @@ public sealed class CodexProfileService {
                 await session.LogoutAsync(cancellationToken).ConfigureAwait(false);
                 if (await profileStorage.RemoveUnexpectedAuthFileAsync(accountId, cancellationToken).ConfigureAwait(false)) {
                     throw new CodexProfileOperationException(
-                        "隔離的 Codex home 原先含有 auth.json；已清除明文檔，移除程序已停止。請重試。",
+                        "登入資料處理失敗，帳號未移除，請重試。",
                         null
                     );
                 }
@@ -450,7 +445,7 @@ public sealed class CodexProfileService {
                 };
                 await profileStorage.SaveTransactionAsync(transaction, CancellationToken.None).ConfigureAwait(false);
                 throw new CodexProfileOperationException(
-                    "Codex 帳號清理完成，但帳號清單有外部更新；原清單已保留，請重新載入後重試移除。",
+                    "帳號未移除，帳號清單有外部更新，請重新載入後重試。",
                     null
                 );
             }
@@ -478,7 +473,7 @@ public sealed class CodexProfileService {
                 }
 
                 throw new CodexProfileOperationException(
-                    "無法安全保存 Codex 帳號移除進度；帳號清單仍保留，請重試。",
+                    "帳號未移除，請重新載入後重試。",
                     new AggregateException(failure, journalFailure)
                 );
             }
@@ -487,12 +482,7 @@ public sealed class CodexProfileService {
                 throw;
             }
 
-            throw new CodexProfileOperationException(
-                homeRemoved
-                    ? "移除清單更新失敗；Codex home 已清理，請重新載入後重試。"
-                    : "無法安全移除 Codex 帳號；帳號與隔離資料仍保留，請重試。",
-                failure
-            );
+            throw new CodexProfileOperationException("帳號未移除，請重新載入後重試。", failure);
         }
     }
 
@@ -575,7 +565,7 @@ public sealed class CodexProfileService {
                 if (catalogContainsAccount) {
                     if (current.Stage != "catalog-committed") {
                         throw new CodexProfileOperationException(
-                            "待清理的 Codex 帳號已存在於帳號清單。為避免刪除有效帳號，已保留資料並停止新增帳號。",
+                            "帳號未保存，請重新載入後重試。",
                             null
                         );
                     }
@@ -587,7 +577,7 @@ public sealed class CodexProfileService {
 
                 if (current.Stage == "catalog-committed") {
                     throw new CodexProfileOperationException(
-                        "新增帳號 journal 已記錄 catalog 提交，但帳號清單中找不到該帳號；隔離資料與 journal 已保留。",
+                        "帳號未保存，請重新載入後重試。",
                         null
                     );
                 }
@@ -597,7 +587,7 @@ public sealed class CodexProfileService {
                 throw;
             } catch (Exception failure) {
                 throw new CodexProfileOperationException(
-                    "先前的 Codex 隔離資料清理尚未完成，已保留資料並停止新增帳號。",
+                    "帳號未保存，請重新載入後重試。",
                     failure
                 );
             }

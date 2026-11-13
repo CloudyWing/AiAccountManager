@@ -755,7 +755,7 @@ public sealed class ClaudeAccountServiceTests {
 
         Assert.Multiple(() => {
             Assert.That(result.Saved, Is.False);
-            Assert.That(result.Message, Does.Contain("尚未完成的 Claude Desktop 切換交易"));
+            Assert.That(result.Message, Does.Contain("尚未完成的 Claude Desktop 帳號切換"));
             Assert.That(repository.Profiles, Is.EqualTo(new[] { profile }));
         });
     }
