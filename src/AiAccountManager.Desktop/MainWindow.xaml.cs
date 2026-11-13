@@ -17,12 +17,13 @@ using Microsoft.Win32;
 namespace CloudyWing.AiAccountManager.Desktop;
 
 public partial class MainWindow : Window {
-    private const int RouteRestoreMaxAttempts = 50;
-
     private static readonly TimeSpan WebViewDisposeTimeout = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan RouteRestoreDeadline = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan RouteDispatchTimeout = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan RouteRetryDelay = TimeSpan.FromMilliseconds(100);
+    private static readonly WebViewRouteRestorer.Timing RouteRestoreTiming = new(
+        TimeSpan.FromSeconds(10),
+        TimeSpan.FromSeconds(1),
+        TimeSpan.FromMilliseconds(100),
+        50
+    );
 
     private readonly IHost host;
     private readonly IServiceProvider services;
@@ -250,73 +251,17 @@ public partial class MainWindow : Window {
         return null;
     }
 
-    private async Task RestoreRouteAsync(BlazorWebView target, string route) {
-        // 派送會排在新 renderer 前置工作之後，可能一直不完成；每次派送與整體都設上限，
-        // 否則重建中旗標無法解除，之後的重建要求會全部停在 pending。
-        DateTimeOffset deadline = DateTimeOffset.UtcNow + RouteRestoreDeadline;
-        bool navigated = false;
-        try {
-            for (int attempt = 0; attempt < RouteRestoreMaxAttempts; attempt++) {
-                if (!CanRestoreRoute(target)) {
-                    recoveryLog.Write("rebuild.route-restore-skipped");
-                    return;
+    private Task RestoreRouteAsync(BlazorWebView target, string route) {
+        return WebViewRouteRestorer.RestoreAsync(
+            () => CanRestoreRoute(target),
+            shouldNavigate => target.TryDispatchAsync(serviceProvider => {
+                if (shouldNavigate()) {
+                    serviceProvider.GetRequiredService<NavigationManager>().NavigateTo(route);
                 }
-
-                TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
-                if (remaining <= TimeSpan.Zero) {
-                    recoveryLog.Write("rebuild.route-restore-failed:deadline-exceeded");
-                    return;
-                }
-
-                TimeSpan timeout = remaining < RouteDispatchTimeout ? remaining : RouteDispatchTimeout;
-                try {
-                    bool dispatched = await target.TryDispatchAsync(serviceProvider => {
-                        // 逾時後委派仍可能稍後執行，導覽前再次確認目標仍有效且尚未導覽過。
-                        if (navigated || !CanRestoreRoute(target)) {
-                            return;
-                        }
-
-                        navigated = true;
-                        serviceProvider.GetRequiredService<NavigationManager>().NavigateTo(route);
-                    }).WaitAsync(timeout);
-                    if (dispatched) {
-                        recoveryLog.Write(navigated ? "rebuild.route-restored" : "rebuild.route-restore-skipped");
-                        return;
-                    }
-                } catch (TimeoutException) {
-                    // 逾時是否已導覽由下方統一判定。
-                }
-
-                if (navigated) {
-                    recoveryLog.Write("rebuild.route-restored");
-                    return;
-                }
-
-                if (GetRouteRetryDelay(deadline - DateTimeOffset.UtcNow) is not TimeSpan retryDelay) {
-                    recoveryLog.Write("rebuild.route-restore-failed:deadline-exceeded");
-                    return;
-                }
-
-                await Task.Delay(retryDelay);
-            }
-
-            recoveryLog.Write("rebuild.route-restore-failed:attempts-exhausted:" + RouteRestoreMaxAttempts);
-        } catch (Exception exception) {
-            recoveryLog.Write($"rebuild.route-restore-failed:{exception.GetType().FullName}:0x{exception.HResult:X8}");
-        }
-    }
-
-    /// <summary>
-    /// 依距離整體期限的剩餘時間，決定下一次重試前的等待時間。
-    /// </summary>
-    /// <param name="remaining">距離整體期限的剩餘時間。</param>
-    /// <returns>等待時間，不超過剩餘時間；期限已到時為 null。</returns>
-    public static TimeSpan? GetRouteRetryDelay(TimeSpan remaining) {
-        if (remaining <= TimeSpan.Zero) {
-            return null;
-        }
-
-        return remaining < RouteRetryDelay ? remaining : RouteRetryDelay;
+            }),
+            RouteRestoreTiming,
+            recoveryLog.Write
+        );
     }
 
     private bool CanRestoreRoute(BlazorWebView target) {
