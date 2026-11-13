@@ -146,6 +146,100 @@ public sealed class DashboardComponentRenderTests {
     }
 
     [Test]
+    public async Task DashboardOverviewReader_FreePlanQuota_ShowsPlanLabelAndSingleThirtyDayWindow() {
+        await using DashboardReaderFixture fixture = new();
+        fixture.CodexQuotaRepository.Seed(CreateFreePlanQuotaRecord(
+            fixture.CodexProfile,
+            fixture.Now,
+            99,
+            fixture.Now.AddDays(30)
+        ));
+
+        DashboardOverviewSnapshot.Provider provider = await fixture.Reader.ReadCodexAsync(CancellationToken.None);
+
+        using (Assert.EnterMultipleScope()) {
+            Assert.That(provider.IdentityStatus, Is.EqualTo(DashboardOverviewSnapshot.IdentityStatus.Matched));
+            Assert.That(provider.QuotaStatus, Is.EqualTo(DashboardOverviewSnapshot.QuotaStatus.Fresh));
+            Assert.That(provider.PlanLabel, Is.EqualTo("免費方案"));
+            Assert.That(provider.Windows, Has.Count.EqualTo(1));
+            Assert.That(provider.Windows[0].Label, Is.EqualTo("30 天"));
+            Assert.That(provider.Windows[0].RemainingPercent, Is.EqualTo(99m));
+            Assert.That(provider.Windows[0].ResetsAtUtc, Is.EqualTo(fixture.Now.AddDays(30)));
+        }
+    }
+
+    [Test]
+    public async Task DashboardOverviewReader_StandardQuota_HasNoPlanLabel() {
+        await using DashboardReaderFixture fixture = new();
+
+        DashboardOverviewSnapshot.Provider provider = await fixture.Reader.ReadCodexAsync(CancellationToken.None);
+
+        Assert.That(provider.PlanLabel, Is.Null);
+    }
+
+    [Test]
+    public async Task Dashboard_FreePlanProvider_RendersPlanChipAndThirtyDayRing() {
+        await using DashboardReaderFixture fixture = new();
+        fixture.CodexQuotaRepository.Seed(CreateFreePlanQuotaRecord(
+            fixture.CodexProfile,
+            fixture.Now,
+            99,
+            fixture.Now.AddDays(30)
+        ));
+
+        string html = await RenderDashboardAsync(fixture.Reader);
+
+        using (Assert.EnterMultipleScope()) {
+            Assert.That(html, Does.Contain("免費方案"));
+            Assert.That(html, Does.Contain("30 天"));
+            Assert.That(html, Does.Contain("99%"));
+            Assert.That(html, Does.Not.Contain("回應不完整"));
+            Assert.That(html, Does.Not.Contain("額度未知"));
+        }
+    }
+
+    [Test]
+    public async Task CodexNotification_FreePlanCurrentAccount_IsExcluded() {
+        await using DashboardReaderFixture fixture = new(useCurrentTime: true);
+        fixture.CodexQuotaRepository.Seed(CreateFreePlanQuotaRecord(
+            fixture.CodexProfile,
+            fixture.Now,
+            1,
+            fixture.Now.AddDays(30)
+        ));
+
+        NotificationSnapshot? snapshot = await fixture.Reader.ReadCodexNotificationAsync(CancellationToken.None);
+
+        Assert.That(snapshot, Is.Null);
+    }
+
+    [Test]
+    public async Task CodexRecommendation_FreePlanAccounts_AreNeitherCurrentNorCandidate() {
+        await using DashboardReaderFixture fixture = new();
+        CodexAccountProfile freeCandidate = CreateCodexProfile(Guid.NewGuid(), "codex-free", fixture.CodexFingerprinter);
+        fixture.CodexCatalog.SetAccounts([fixture.CodexProfile, freeCandidate]);
+        fixture.CodexQuotaRepository.Seed(CreateCodexQuotaRecord(fixture.CodexProfile, fixture.Now, 10, 10,
+            fixture.Now.AddHours(1), fixture.Now.AddDays(1)));
+        fixture.CodexQuotaRepository.Seed(CreateFreePlanQuotaRecord(freeCandidate, fixture.Now, 99, fixture.Now.AddDays(30)));
+
+        RecommendationAccount? withFreeCandidate = await fixture.Reader.ReadCodexRecommendationAsync(CancellationToken.None);
+        fixture.CodexQuotaRepository.Seed(CreateFreePlanQuotaRecord(
+            fixture.CodexProfile,
+            fixture.Now,
+            1,
+            fixture.Now.AddDays(30)
+        ));
+        fixture.CodexQuotaRepository.Seed(CreateCodexQuotaRecord(freeCandidate, fixture.Now, 100, 100,
+            fixture.Now.AddHours(1), fixture.Now.AddDays(1)));
+        RecommendationAccount? withFreeCurrent = await fixture.Reader.ReadCodexRecommendationAsync(CancellationToken.None);
+
+        using (Assert.EnterMultipleScope()) {
+            Assert.That(withFreeCandidate, Is.Null);
+            Assert.That(withFreeCurrent, Is.Null);
+        }
+    }
+
+    [Test]
     public async Task DashboardOverviewReader_UnmatchedAndUnavailableIdentities_DoNotLoadAnySavedQuota() {
         await using DashboardReaderFixture fixture = new();
         CodexAccountProfile otherCodexProfile = CreateCodexProfile(
@@ -306,10 +400,11 @@ public sealed class DashboardComponentRenderTests {
             Assert.That(html, Does.Contain("Opus"));
             Assert.That(html, Does.Contain("68%"));
             Assert.That(html, Does.Contain("42%"));
-            Assert.That(html, Does.Contain("Synthetic Codex source"));
-            Assert.That(html, Does.Contain("Synthetic Claude source"));
+            Assert.That(html, Does.Not.Contain("Synthetic Codex source"));
+            Assert.That(html, Does.Not.Contain("Synthetic Claude source"));
+            Assert.That(html, Does.Not.Contain("資料來源"));
             Assert.That(html, Does.Contain("保留最近一次成功快照。"));
-            Assert.That(html, Does.Contain("資料已過期，顯示最近一次成功快照"));
+            Assert.That(html, Does.Contain("資料已過期，顯示最近一次成功的結果"));
             Assert.That(html, Does.Contain("href=\"/codex\""));
             Assert.That(html, Does.Contain("href=\"/claude\""));
             Assert.That(html.IndexOf("data-provider=\"claude\"", StringComparison.Ordinal),
@@ -683,6 +778,27 @@ public sealed class DashboardComponentRenderTests {
                 now.AddMinutes(-2),
                 new(300, fiveHourRemaining, fiveHourReset),
                 new(10080, weeklyRemaining, weeklyReset)
+            ),
+            null
+        );
+    }
+
+    private static QuotaSnapshotRecord CreateFreePlanQuotaRecord(
+        CodexAccountProfile profile,
+        DateTimeOffset now,
+        int remaining,
+        DateTimeOffset reset
+    ) {
+        return new(
+            profile.AccountId,
+            profile.IdentityFingerprint,
+            profile.ProfileRevision,
+            new(
+                now.AddMinutes(-2),
+                null,
+                null,
+                null,
+                new(43200, remaining, reset)
             ),
             null
         );

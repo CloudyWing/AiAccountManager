@@ -77,7 +77,6 @@ public sealed class ClaudeComponentRenderTests {
                     new DateTimeOffset(2026, 10, 31, 10, 0, 1, TimeSpan.Zero)
                 )
             },
-            [nameof(ClaudeAccountCard.QuotaSourceText)] = "Alpha",
             [nameof(ClaudeAccountCard.QuotaCheckedAtText)] = "2026/10/26 09:00",
             [nameof(ClaudeAccountCard.CanRefreshQuota)] = true,
             [nameof(ClaudeAccountCard.CanRequestSwitch)] = true
@@ -107,14 +106,14 @@ public sealed class ClaudeComponentRenderTests {
             [nameof(ClaudeAccountCard.DisplayName)] = "Beta",
             [nameof(ClaudeAccountCard.MaskedIdentity)] = "b***@example.test",
             [nameof(ClaudeAccountCard.QuotaStatusText)] = "未知",
-            [nameof(ClaudeAccountCard.QuotaMessage)] = "尚未查詢此 Claude profile 的額度。",
+            [nameof(ClaudeAccountCard.QuotaMessage)] = "尚未查詢此 Claude 帳號的額度。",
             [nameof(ClaudeAccountCard.QuotaWindows)] = Array.Empty<ClaudeQuotaSnapshot.Window>(),
             [nameof(ClaudeAccountCard.CanRefreshQuota)] = true
         });
 
         Assert.Multiple(() => {
             Assert.That(html, Does.Contain("未知"));
-            Assert.That(html, Does.Contain("尚未查詢此 Claude profile 的額度。"));
+            Assert.That(html, Does.Contain("尚未查詢此 Claude 帳號的額度。"));
             Assert.That(html, Does.Not.Contain("% 剩餘"));
         });
     }
@@ -157,7 +156,7 @@ public sealed class ClaudeComponentRenderTests {
             Assert.That(html, Does.Contain("切換目標"));
             Assert.That(html, Does.Contain("來源帳號的完整 Code Session 清單覆蓋目標帳號的清單"));
             Assert.That(html, Does.Contain("來源清單 0 個 Session，目標目前有 20 個 Session。"));
-            Assert.That(html, Does.Contain("目標帳號的 Session 資料夾會整個換成來源帳號的內容"));
+            Assert.That(html, Does.Contain("目標帳號的 Session 清單會被完整取代"));
             Assert.That(html, Does.Contain("確認切換並同步"));
             Assert.That(html, Does.Contain("取消"));
         });
@@ -173,12 +172,12 @@ public sealed class ClaudeComponentRenderTests {
             [nameof(ClaudeSwitchConfirmationDialog.TargetIdentity)] = "b***@example.test",
             [nameof(ClaudeSwitchConfirmationDialog.CanConfirm)] = false,
             [nameof(ClaudeSwitchConfirmationDialog.IsRecoveryRequired)] = true,
-            [nameof(ClaudeSwitchConfirmationDialog.RecoveryMessage)] = "復原失敗，交易資料仍保留。",
+            [nameof(ClaudeSwitchConfirmationDialog.RecoveryMessage)] = "復原失敗，請稍後重試。",
             [nameof(ClaudeSwitchConfirmationDialog.OnRecover)] = EventCallback.Factory.Create(this, () => Task.CompletedTask)
         });
 
         Assert.Multiple(() => {
-            Assert.That(html, Does.Contain("復原失敗，交易資料仍保留。"));
+            Assert.That(html, Does.Contain("復原失敗，請稍後重試。"));
             Assert.That(html, Does.Contain("嘗試復原"));
             Assert.That(html, Does.Contain("確認切換"));
             Assert.That(html, Does.Contain("disabled"));
@@ -217,7 +216,7 @@ public sealed class ClaudeComponentRenderTests {
             Assert.That(html, Does.Contain("目前 Desktop 帳號"));
             Assert.That(html, Does.Contain("Alpha"));
             Assert.That(html, Does.Contain("Beta"));
-            Assert.That(html, Does.Contain("尚未查詢此 Claude profile 的額度。"));
+            Assert.That(html, Does.Contain("尚未查詢此 Claude 帳號的額度。"));
         });
     }
 
@@ -576,9 +575,9 @@ public sealed class ClaudeComponentRenderTests {
         string html = await RenderAsync<ClaudePage>(services);
 
         Assert.Multiple(() => {
-            Assert.That(html, Does.Contain("偵測到尚未完成的切換交易"));
+            Assert.That(html, Does.Contain("偵測到尚未完成的帳號切換"));
             Assert.That(html, Does.Contain("重試復原"));
-            Assert.That(html, Does.Contain("先完成待復原交易"));
+            Assert.That(html, Does.Contain("請先完成待復原的切換"));
             Assert.That(html, Does.Contain("disabled"));
             Assert.That(html, Does.Contain("查詢額度"));
         });
@@ -596,7 +595,7 @@ public sealed class ClaudeComponentRenderTests {
         string html = await RenderAsync<ClaudePage>(services);
 
         Assert.Multiple(() => {
-            Assert.That(html, Does.Contain("帳號切換已完成，僅待清理這筆交易的 history 暫存"));
+            Assert.That(html, Does.Contain("帳號切換已完成，尚有暫存資料待清理"));
             Assert.That(html, Does.Contain("重試暫存清理"));
             Assert.That(html, Does.Not.Contain("重試復原"));
             Assert.That(html, Does.Not.Contain("需要復原"));
@@ -618,7 +617,7 @@ public sealed class ClaudeComponentRenderTests {
 
         Assert.Multiple(() => {
             Assert.That(repository.Transaction!.CurrentStage, Is.EqualTo(ClaudeSwitchTransaction.Stage.Committed));
-            Assert.That(html, Does.Contain("交易暫存已清理"));
+            Assert.That(html, Does.Contain("暫存資料已清理"));
             Assert.That(html, Does.Not.Contain("重試復原"));
             Assert.That(html, Does.Contain("目前 Claude Desktop 身分"));
         });

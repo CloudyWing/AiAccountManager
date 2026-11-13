@@ -113,7 +113,7 @@ public sealed class ClaudeAccountService {
         if (IsRecoveryRequired(transaction)) {
             return await CaptureFailedAsync(
                 CaptureOutcome.RecoveryRequired,
-                "有未完成的 Claude Desktop 復原交易，完成復原前無法保存 profile。",
+                "有尚未完成的 Claude Desktop 帳號切換，完成復原前無法保存帳號。",
                 operationCancellationToken
             ).ConfigureAwait(false);
         }
@@ -199,8 +199,8 @@ public sealed class ClaudeAccountService {
                 ? CaptureOutcome.DesktopRunning
                 : CaptureOutcome.ProcessStatusUnknown;
             string message = afterReadStatus == IClaudeDesktopProcessController.ProcessStatus.Running
-                ? "Claude Desktop 在讀取認證快照期間重新啟動，未保存帳號。請正常結束後重試。"
-                : "讀取認證快照後無法確認 Claude Desktop 已停止，未保存帳號。";
+                ? "Claude Desktop 在保存期間重新啟動，未保存帳號。請正常結束後重試。"
+                : "無法確認 Claude Desktop 已停止，未保存帳號。";
             return await CaptureFailedAsync(
                 outcome,
                 message,
@@ -247,7 +247,7 @@ public sealed class ClaudeAccountService {
                 )) {
                 return await CaptureFailedAsync(
                     CaptureOutcome.IdentityUnavailable,
-                    "Claude Desktop 認證檔在身分驗證後發生變動，未保存帳號。",
+                    "Claude Desktop 登入資料在保存期間發生變動，未保存帳號，請重試。",
                     operationCancellationToken,
                     IdentityStatus.Unknown
                 ).ConfigureAwait(false);
@@ -256,7 +256,7 @@ public sealed class ClaudeAccountService {
             if (!await snapshotLease.ValidateAsync(operationCancellationToken).ConfigureAwait(false)) {
                 return await CaptureFailedAsync(
                     CaptureOutcome.BindingMismatch,
-                    "Claude Desktop 認證檔案集合或快照內容已變動，未保存帳號。",
+                    "Claude Desktop 登入資料在保存期間發生變動，未保存帳號，請重試。",
                     operationCancellationToken,
                     IdentityStatus.ReauthenticationRequired
                 ).ConfigureAwait(false);
@@ -270,7 +270,7 @@ public sealed class ClaudeAccountService {
             if (binding is null || !SnapshotMatchesSource(desktopSnapshot, binding)) {
                 return await CaptureFailedAsync(
                     CaptureOutcome.BindingMismatch,
-                    "Desktop 資料來源或 Local State key 已變動，未保存帳號。",
+                    "Claude Desktop 的資料已變動，未保存帳號，請重試。",
                     operationCancellationToken,
                     IdentityStatus.Unknown
                 ).ConfigureAwait(false);
@@ -305,7 +305,7 @@ public sealed class ClaudeAccountService {
                         )) {
                         return await CaptureFailedAsync(
                             CaptureOutcome.BindingMismatch,
-                            "Claude Desktop 的 Local State key 與已保存來源不同，未保存帳號。",
+                            "此 Claude Desktop 與先前保存的來源不同，未保存帳號。",
                             operationCancellationToken,
                             IdentityStatus.Unknown
                         ).ConfigureAwait(false);
@@ -326,7 +326,7 @@ public sealed class ClaudeAccountService {
                     if (savedBindingId is Guid previousBindingId && previousBindingId != existingBinding.Source.BindingId) {
                         return await CaptureFailedAsync(
                             CaptureOutcome.BindingMismatch,
-                            "多個已保存來源綁定同時符合目前安裝，未覆寫任何資料。",
+                            "已有多個已保存帳號與目前帳號重複，未保存，請先移除重複的帳號。",
                             operationCancellationToken,
                             IdentityStatus.Unknown
                         ).ConfigureAwait(false);
@@ -341,7 +341,7 @@ public sealed class ClaudeAccountService {
                     if (existingProfile is not null) {
                         return await CaptureFailedAsync(
                             CaptureOutcome.BindingMismatch,
-                            "多個已保存 profile 同時符合目前身分及來源，未覆寫任何資料。",
+                            "已有多個已保存帳號與目前帳號重複，未保存，請先移除重複的帳號。",
                             operationCancellationToken,
                             IdentityStatus.Unknown
                         ).ConfigureAwait(false);
@@ -394,7 +394,7 @@ public sealed class ClaudeAccountService {
             if (!await snapshotLease.ValidateAsync(operationCancellationToken).ConfigureAwait(false)) {
                 return await CaptureFailedAsync(
                     CaptureOutcome.BindingMismatch,
-                    "Claude Desktop 在保存前認證檔案集合或快照內容已變動，未保存帳號。",
+                    "Claude Desktop 登入資料在保存期間發生變動，未保存帳號，請重試。",
                     operationCancellationToken,
                     IdentityStatus.ReauthenticationRequired
                 ).ConfigureAwait(false);
@@ -408,7 +408,7 @@ public sealed class ClaudeAccountService {
         } catch (Exception) {
             return await CaptureFailedAsync(
                 CaptureOutcome.Failed,
-                "無法安全擷取或保存 Claude Desktop 認證快照。",
+                "無法安全保存 Claude Desktop 登入資料。",
                 operationCancellationToken
             ).ConfigureAwait(false);
         }
@@ -417,8 +417,8 @@ public sealed class ClaudeAccountService {
             return await CaptureFailedAsync(
                 saveResult.Conflict ? CaptureOutcome.Conflict : CaptureOutcome.Failed,
                 saveResult.Conflict
-                    ? "Claude profile 清單已在其他作業中更新。請重新載入後再保存。"
-                    : "無法安全保存 Claude profile。",
+                    ? "Claude 帳號清單已在其他作業中更新。請重新載入後再保存。"
+                    : "無法安全保存 Claude 帳號。",
                 operationCancellationToken
             ).ConfigureAwait(false);
         }
@@ -436,7 +436,7 @@ public sealed class ClaudeAccountService {
                 savedProfile.MaskedEmail,
                 clock.UtcNow,
                 savedProfile,
-                "目前 Claude Desktop 身分已由本機設定與 profile API 確認。"
+                "目前 Claude Desktop 身分已確認。"
             ),
             LoadedAtUtc = clock.UtcNow
         };
@@ -576,7 +576,7 @@ public sealed class ClaudeAccountService {
                 sourceProfile?.MaskedEmail,
                 null,
                 sourceProfile,
-                "有 Claude Desktop 切換交易待復原。完成復原前無法保存 profile 或開始切換。"
+                "有尚未完成的 Claude Desktop 帳號切換。完成復原前無法保存帳號或開始切換。"
             );
         } else if (locateResult.Status != IClaudeDesktopInstallationLocator.LocateStatus.Found
             || locateResult.Installation is null) {
@@ -612,7 +612,7 @@ public sealed class ClaudeAccountService {
                     null,
                     null,
                     null,
-                    "無法讀取 Claude Desktop 設定或向 profile API 驗證身分。"
+                    "無法驗證 Claude Desktop 身分，請確認已登入後重新讀取。"
                 );
             }
         }
@@ -825,7 +825,7 @@ public sealed class ClaudeAccountService {
         if (transaction is not null
             && transaction.CurrentStage is not ClaudeSwitchTransaction.Stage.Committed
                 and not ClaudeSwitchTransaction.Stage.RolledBack) {
-            return new(false, "有尚未完成的 Claude Desktop 切換交易，完成復原或清理前無法變更帳號清單。");
+            return new(false, "有尚未完成的 Claude Desktop 帳號切換，完成復原或清理前無法變更帳號清單。");
         }
 
         IClaudeAccountRepository.Snapshot catalog = await accountRepository

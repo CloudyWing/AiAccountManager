@@ -6,7 +6,7 @@
                 <MudText Typo="Typo.subtitle1">@(string.IsNullOrWhiteSpace(Profile.Alias) ? Profile.MaskedEmail : Profile.Alias)</MudText>
                 <MudText Typo="Typo.body2" Class="mud-text-secondary">身分：@Profile.MaskedEmail</MudText>
                 <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
-                    確認後會移除此帳號在本工具保存的 Desktop 登入快照，之後無法再切換到這個帳號，需重新登入並保存。Claude Desktop 目前的登入狀態與 Code Session 不受影響。
+                    確認後會移除此帳號在本工具保存的登入資料，之後無法再切換到這個帳號，需重新登入並保存。Claude Desktop 目前的登入狀態與 Code Session 不受影響。
                 </MudAlert>
             }
         </MudStack>

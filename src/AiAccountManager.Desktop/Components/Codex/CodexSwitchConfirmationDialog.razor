@@ -14,7 +14,7 @@
             </dl>
             <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
                 @if (DesktopRunning) {
-                    <span>會先正常關閉 Codex Desktop，保存目前帳號最新的登入後改用目標帳號，完成後重新開啟。若 Codex Desktop 未在 20 秒內結束，切換會中止且不改變任何登入。</span>
+                    <span>會先正常關閉 Codex Desktop，保存目前帳號最新的登入後改用目標帳號，完成後重新開啟。若 Codex Desktop 無法關閉，切換會中止且不改變任何登入。</span>
                 } else {
                     <span>Codex Desktop 未執行。會保存目前帳號最新的登入後改用目標帳號，下次開啟 Codex Desktop 即為目標帳號。</span>
                 }

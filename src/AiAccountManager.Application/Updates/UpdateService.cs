@@ -200,7 +200,7 @@ public sealed class UpdateService {
                 await updateAdapter.ApplyAndRestartAsync(feedUri, applyWait.Token).ConfigureAwait(false);
                 handoffStarted = false;
                 downloadedFeedUri = null;
-                return SetState(state with { Status = UpdateStatus.Applied, Message = "更新已交給 Velopack 套用。" });
+                return SetState(state with { Status = UpdateStatus.Applied, Message = "正在套用更新，應用程式即將重新啟動。" });
             } catch (OperationCanceledException) when (applyWait.IsCancellationRequested) {
                 if (handoffStarted) {
                     await feedCoordinator!.CancelApplyAsync().ConfigureAwait(false);
@@ -212,7 +212,7 @@ public sealed class UpdateService {
                     0,
                     cancellationToken.IsCancellationRequested
                         ? "更新套用已取消。"
-                        : "等待進行中的帳號操作超過 30 秒；已取消更新套用。",
+                        : "仍有進行中的帳號操作，已取消更新套用，請稍後重試。",
                     feedUri.AbsoluteUri
                 ));
             } catch (Exception) {
@@ -232,7 +232,7 @@ public sealed class UpdateService {
         try {
             return UpdateFeedResolver.Resolve(settings.Settings.UpdateFeedUrl);
         } catch (InvalidDataException) {
-            SetState(new UpdateServiceState(UpdateStatus.Error, null, 0, "更新來源必須是未含帳密的絕對 HTTPS 網址。", null));
+            SetState(new UpdateServiceState(UpdateStatus.Error, null, 0, "更新來源必須是 HTTPS 網址，且不可包含帳號密碼。", null));
             throw;
         }
     }

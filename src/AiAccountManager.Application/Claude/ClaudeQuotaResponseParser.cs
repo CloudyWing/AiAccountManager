@@ -21,7 +21,7 @@ public static class ClaudeQuotaResponseParser {
     /// <returns>完整 snapshot 或標記為 incomplete 的部分解析結果。</returns>
     public static ParseResult Parse(JsonElement payload, Guid profileId, DateTimeOffset retrievedAtUtc) {
         if (payload.ValueKind != JsonValueKind.Object) {
-            return ParseResult.Incomplete("Claude usage 回應不是 JSON object。");
+            return ParseResult.Incomplete("額度資料格式無法辨識，請稍後再試。");
         }
 
         Dictionary<string, ClaudeQuotaSnapshot.Window> windows = new(StringComparer.Ordinal);
@@ -53,7 +53,7 @@ public static class ClaudeQuotaResponseParser {
 
         if (!complete) {
             return new(false, null, windows.Values.OrderBy(window => window.DurationMinutes).ThenBy(window => window.Key).ToArray(),
-                "Claude usage 回應缺少必要視窗或包含目前不支援的額度格式。");
+                "額度資料格式無法辨識，請稍後再試。");
         }
 
         ClaudeQuotaSnapshot snapshot = new(

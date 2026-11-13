@@ -8,8 +8,8 @@ namespace CloudyWing.AiAccountManager.Application.Settings;
 /// 載入與儲存設定，並載入 Codex 帳號清單。
 /// </summary>
 public sealed class SettingsService {
-    private const string SettingsLoadFailure = "無法讀取設定。原始檔案已保留，請重試。";
-    private const string CatalogLoadFailure = "無法讀取 Codex 額度帳號。原始檔案已保留，請重試。";
+    private const string SettingsLoadFailure = "無法讀取設定，請重試。";
+    private const string CatalogLoadFailure = "無法讀取 Codex 額度帳號，請重試。";
     private readonly ISettingsRepository settingsRepository;
     private readonly IAccountCatalogRepository accountCatalogRepository;
     private readonly IStartupRegistration? startupRegistration;

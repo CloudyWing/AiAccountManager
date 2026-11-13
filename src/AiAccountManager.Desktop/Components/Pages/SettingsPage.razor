@@ -51,7 +51,7 @@
             <MudSelectItem T="bool" Value="@true">啟用</MudSelectItem>
             <MudSelectItem T="bool" Value="@false">停用</MudSelectItem>
         </MudSelect>
-        <MudText Typo="Typo.body2">實驗性功能：自動使用依賴 Codex 未公開的介面，介面變動時可能失效或誤判。使用重置券後，5 小時與每週額度會重新計算，原本的重置時間會延後。App 必須保持執行，才會在到期前自動使用。</MudText>
+        <MudText Typo="Typo.body2">實驗性功能，可能失效或誤判。使用重置券後，5 小時與每週額度會重新計算，原本的重置時間會延後。App 必須保持執行，才會在到期前自動使用。</MudText>
         <MudTextField T="int" Label="到期前分鐘數" Value="@(SettingsState.Settings?.AutoUseResetCreditsMinutes ?? 30)" ValueChanged="SaveAutoUseMinutesAsync" Error="@(autoUseMinutesError is not null)" ErrorText="@autoUseMinutesError" Disabled="isSaving || SettingsState.Settings is null" />
     </MudPaper>
 
@@ -84,7 +84,7 @@
         <MudStack Row="true" Spacing="2">
             <MudButton Variant="Variant.Outlined" Disabled="@isSendingTest" OnClick="SendTestNotificationAsync">@(isSendingTest ? "傳送中…" : "傳送測試通知")</MudButton>
         </MudStack>
-        <MudText Typo="Typo.caption" Class="mud-text-secondary">測試通知不受上方「額度偏低通知」開關影響，點擊氣泡不會切換頁面，也不會影響正式通知。</MudText>
+        <MudText Typo="Typo.caption" Class="mud-text-secondary">測試通知不受「額度偏低通知」開關影響。</MudText>
     </MudPaper>
     <UpdateSettings />
 </MudStack>

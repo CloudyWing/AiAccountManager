@@ -5,10 +5,10 @@
 <MudPaper Elevation="0" Outlined="true" Class="content-card">
     <MudText Typo="Typo.h6">更新來源</MudText>
     <MudText Typo="Typo.body2" Class="mud-text-secondary">
-        設定自己的 HTTPS Velopack feed。留空時使用預設來源。
+        自訂更新來源網址（需為 HTTPS）。留空時使用預設來源。
     </MudText>
     <MudTextField T="string"
-                  Label="更新 feed URL（選填）"
+                  Label="更新來源網址（選填）"
                   Value="@feedUrl"
                   ValueChanged="OnFeedChanged"
                   Disabled="@isBusy"
@@ -22,7 +22,11 @@
     }
 
     @if (SettingsState.Settings is not null) {
-        <MudText Typo="Typo.body2">目前來源（@(string.IsNullOrWhiteSpace(SettingsState.Settings.UpdateFeedUrl) ? "預設" : "自訂")）：@EffectiveFeed</MudText>
+        @if (string.IsNullOrWhiteSpace(SettingsState.Settings.UpdateFeedUrl)) {
+            <MudText Typo="Typo.body2">目前使用預設來源。</MudText>
+        } else {
+            <MudText Typo="Typo.body2">目前來源（自訂）：@EffectiveFeed</MudText>
+        }
     }
 
     <MudText Typo="Typo.body2">@StatusMessage</MudText>

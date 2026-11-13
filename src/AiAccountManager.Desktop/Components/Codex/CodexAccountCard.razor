@@ -10,12 +10,15 @@
                     <div class="account-card-title">
                         <MudText Typo="Typo.h6">@DisplayName</MudText>
                         @if (IsLocallyMatched) {
-                            <MudChip T="string" Color="Color.Success" Variant="Variant.Text" Size="Size.Small">符合本機登入資料</MudChip>
+                            <MudChip T="string" Color="Color.Success" Variant="Variant.Text" Size="Size.Small">目前 Desktop 使用中</MudChip>
                         }
                     </div>
                     <MudText Typo="Typo.body2" Class="mud-text-secondary">身分：@Account.MaskedIdentity</MudText>
                 </div>
                 <div class="account-card-actions">
+                    @if (Quota?.Snapshot?.LastSuccessfulSnapshot?.IsFreePlan == true) {
+                        <MudChip T="string" Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small">免費方案</MudChip>
+                    }
                     <MudChip T="string" Color="@StatusColor" Variant="Variant.Outlined" Size="Size.Small">@StatusText</MudChip>
                     <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
                                    Color="Color.Default"
@@ -45,12 +48,22 @@
 
             @if (Quota?.Snapshot?.LastSuccessfulSnapshot is QuotaSuccessfulSnapshot success) {
                 <div class="account-quota-grid">
-                    <QuotaBar Label="5 小時"
-                              RemainingPercent="@success.FiveHour.RemainingPercent"
-                              ResetText="@FormatReset(success.FiveHour.ResetsAtUtc)" />
-                    <QuotaBar Label="每週"
-                              RemainingPercent="@success.Weekly.RemainingPercent"
-                              ResetText="@FormatReset(success.Weekly.ResetsAtUtc)" />
+                    @if (success.FreePlanWindow is QuotaWindow freeWindow) {
+                        <QuotaBar Label="@QuotaWindowLabels.ForDuration(freeWindow.DurationMinutes)"
+                                  RemainingPercent="@freeWindow.RemainingPercent"
+                                  ResetText="@FormatReset(freeWindow.ResetsAtUtc)" />
+                    } else {
+                        @if (success.FiveHour is QuotaWindow fiveHour) {
+                            <QuotaBar Label="@QuotaWindowLabels.ForDuration(fiveHour.DurationMinutes)"
+                                      RemainingPercent="@fiveHour.RemainingPercent"
+                                      ResetText="@FormatReset(fiveHour.ResetsAtUtc)" />
+                        }
+                        @if (success.Weekly is QuotaWindow weekly) {
+                            <QuotaBar Label="@QuotaWindowLabels.ForDuration(weekly.DurationMinutes)"
+                                      RemainingPercent="@weekly.RemainingPercent"
+                                      ResetText="@FormatReset(weekly.ResetsAtUtc)" />
+                        }
+                    }
                 </div>
                 <MudText Typo="Typo.caption" Class="mud-text-secondary">@QuotaUpdatedAtFormatter.Format(success.RetrievedAtUtc, DateTimeOffset.UtcNow)</MudText>
                 @if (success.ResetCredits is ResetCreditSummary credits) {
@@ -84,7 +97,7 @@
                 <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
                 <MudText Typo="Typo.body2" Class="mud-text-secondary">正在讀取額度；完成後會更新此摘要。</MudText>
             } else {
-                <MudText Typo="Typo.body2" Class="mud-text-secondary">尚無成功額度快照；未知額度不以 0% 顯示。</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">尚未取得額度。</MudText>
                 <MudText Typo="Typo.body2">重置券：未知</MudText>
                 <MudButton Variant="Variant.Outlined" Disabled="true">使用重置券</MudButton>
             }
@@ -113,7 +126,7 @@
                     <MudText Typo="Typo.caption" Class="mud-text-secondary">
                         最後成功更新：@details.RetrievedAtUtc.ToLocalTime().ToString("yyyy/MM/dd HH:mm", CultureInfo.CurrentCulture)
                         @if (Quota?.IsStale == true) {
-                            <span> · 顯示的是舊快照</span>
+                            <span> · 顯示的是舊資料</span>
                         }
                     </MudText>
                 }

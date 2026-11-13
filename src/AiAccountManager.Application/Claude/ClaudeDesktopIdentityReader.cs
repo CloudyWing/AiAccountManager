@@ -69,7 +69,7 @@ internal sealed class ClaudeDesktopIdentityReader {
                 null,
                 null,
                 null,
-                "Claude Desktop 設定沒有可驗證的 OAuth token，請在 Desktop 重新登入。"
+                "請在 Claude Desktop 重新登入。"
             );
         }
 
@@ -170,7 +170,7 @@ internal sealed class ClaudeDesktopIdentityReader {
                 null,
                 null,
                 null,
-                "Claude Desktop token 候選無法唯一確認 account／organization，請在 Desktop 完成登入後重新讀取身分。"
+                "無法確認目前的 Claude 帳號，請在 Desktop 完成登入後重新讀取身分。"
             );
         }
 
@@ -181,10 +181,10 @@ internal sealed class ClaudeDesktopIdentityReader {
                 : ClaudeAccountService.IdentityStatus.Unknown;
         string message = status switch {
             ClaudeAccountService.IdentityStatus.ReauthenticationRequired
-                => "Claude Desktop token 已失效或目前無權讀取帳號資料，請在 Desktop 重新登入。",
+                => "登入已失效，請在 Claude Desktop 重新登入。",
             ClaudeAccountService.IdentityStatus.Mismatch
-                => "Claude Desktop 本機帳號 UUID 與 OAuth profile 回應不一致。",
-            _ => "目前無法向 Claude profile API 確認 Desktop 帳號。"
+                => "本機帳號與線上帳號資料不一致。",
+            _ => "目前無法確認 Claude Desktop 帳號，請稍後再試。"
         };
 
         return CreateResult(status, null, null, null, message);

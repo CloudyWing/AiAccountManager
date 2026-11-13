@@ -165,10 +165,48 @@ public sealed class CodexQuotaServiceTests {
         QuotaSnapshotView view = await context.Service.RefreshAsync(context.Account.AccountId, CancellationToken.None);
 
         Assert.That(view.Status, Is.EqualTo(QuotaDisplayStatus.Fresh));
-        Assert.That(view.Snapshot?.LastSuccessfulSnapshot?.FiveHour.RemainingPercent, Is.EqualTo(80));
-        Assert.That(view.Snapshot?.LastSuccessfulSnapshot?.Weekly.RemainingPercent, Is.EqualTo(65));
+        Assert.That(view.Snapshot?.LastSuccessfulSnapshot?.FiveHour?.RemainingPercent, Is.EqualTo(80));
+        Assert.That(view.Snapshot?.LastSuccessfulSnapshot?.Weekly?.RemainingPercent, Is.EqualTo(65));
         Assert.That(view.Snapshot?.LastAttempt?.Status, Is.Not.EqualTo(QuotaRefreshStatus.ReauthenticationRequired));
         Assert.That(context.Session.RateLimitReadCount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task FreePlanResponseSavesThirtyDayWindowAsFreshSnapshot() {
+        QuotaTestContext context = new();
+        context.Session.RateLimits = JsonElementFrom("""
+            {
+              "accountId": "chatgpt-account-123",
+              "rateLimits": {
+                "limitId": "codex",
+                "primary": { "usedPercent": 1, "windowDurationMins": 43200, "resetsAt": 1796893535 },
+                "secondary": null,
+                "planType": "free"
+              },
+              "rateLimitsByLimitId": {
+                "codex": {
+                  "limitId": "codex",
+                  "primary": { "usedPercent": 1, "windowDurationMins": 43200, "resetsAt": 1796893535 },
+                  "secondary": null,
+                  "planType": "free"
+                }
+              },
+              "rateLimitResetCredits": { "availableCount": 0, "credits": [] }
+            }
+            """);
+
+        QuotaSnapshotView view = await context.Service.RefreshAsync(context.Account.AccountId, CancellationToken.None);
+
+        QuotaSuccessfulSnapshot? success = view.Snapshot?.LastSuccessfulSnapshot;
+        Assert.Multiple(() => {
+            Assert.That(view.Status, Is.EqualTo(QuotaDisplayStatus.Fresh));
+            Assert.That(success?.IsFreePlan, Is.True);
+            Assert.That(success?.FiveHour, Is.Null);
+            Assert.That(success?.Weekly, Is.Null);
+            Assert.That(success?.FreePlanWindow, Is.EqualTo(
+                new QuotaWindow(43200, 99, DateTimeOffset.FromUnixTimeSeconds(1796893535))
+            ));
+        });
     }
 
     [Test]
@@ -319,8 +357,8 @@ public sealed class CodexQuotaServiceTests {
 
         Assert.That(view.Status, Is.EqualTo(QuotaDisplayStatus.Fresh));
         Assert.That(context.Session.RateLimitReadCount, Is.EqualTo(2));
-        Assert.That(view.Snapshot?.LastSuccessfulSnapshot?.FiveHour.RemainingPercent, Is.EqualTo(75));
-        Assert.That(view.Snapshot?.LastSuccessfulSnapshot?.Weekly.RemainingPercent, Is.EqualTo(60));
+        Assert.That(view.Snapshot?.LastSuccessfulSnapshot?.FiveHour?.RemainingPercent, Is.EqualTo(75));
+        Assert.That(view.Snapshot?.LastSuccessfulSnapshot?.Weekly?.RemainingPercent, Is.EqualTo(60));
     }
 
     [Test]

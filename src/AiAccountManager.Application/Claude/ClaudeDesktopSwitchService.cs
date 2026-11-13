@@ -140,7 +140,7 @@ public sealed class ClaudeDesktopSwitchService {
             || targetProfile is null
             || sourceProfile.ProfileRevision != currentPreview.SourceProfile.ProfileRevision
             || targetProfile.ProfileRevision != currentPreview.TargetProfile.ProfileRevision) {
-            return new(SwitchOutcome.Rejected, null, "Claude profile 已在其他作業中更新，請重新預覽。");
+            return new(SwitchOutcome.Rejected, null, "Claude 帳號已在其他作業中更新，請重新預覽。");
         }
 
         ClaudeAccountProfile.DesktopSnapshot? targetSnapshot = await accountRepository
@@ -150,7 +150,7 @@ public sealed class ClaudeDesktopSwitchService {
             || !IsProfileSnapshot(targetProfile, targetSnapshot, locateResult.Installation)
             || !HasCompleteCookieSidecarSnapshot(targetSnapshot)) {
             return new(SwitchOutcome.Blocked, null,
-                "目標 profile snapshot 缺失、需要重新捕捉或安全綁定不同，未修改 Desktop 資料。");
+                "目標帳號的登入資料已遺失或失效，請重新保存此帳號。未修改 Claude Desktop 資料。");
         }
 
         IClaudeDesktopProcessController.ProcessStatus initialProcessStatus;
@@ -188,7 +188,7 @@ public sealed class ClaudeDesktopSwitchService {
         } catch (OperationCanceledException) when (operationCancellationToken.IsCancellationRequested) {
             throw;
         } catch (Exception) {
-            return new(SwitchOutcome.Rejected, null, "無法保存 Claude 切換交易紀錄，未修改 Desktop 資料。");
+            return new(SwitchOutcome.Rejected, null, "無法記錄切換狀態，未修改 Claude Desktop 資料。");
         }
 
         try {
@@ -438,7 +438,7 @@ public sealed class ClaudeDesktopSwitchService {
             .ConfigureAwait(false);
         if (transaction is not null && (ClaudeAccountService.IsRecoveryRequired(transaction) || IsCommittedCleanupPending(transaction))
             && !HasTrustedProvenance(transaction)) {
-            return new(SwitchOutcome.RecoveryRequired, transaction, "舊交易缺少可信來源證據，已保留原始交易與備份，請先處理來源驗證。");
+            return new(SwitchOutcome.RecoveryRequired, transaction, "無法自動確認上次切換的狀態，資料已保留。");
         }
         if (IsCommittedCleanupPending(transaction)) {
             return await RetryCommittedCleanupAsync(
@@ -448,7 +448,7 @@ public sealed class ClaudeDesktopSwitchService {
         }
 
         if (!ClaudeAccountService.IsRecoveryRequired(transaction)) {
-            return new(SwitchOutcome.Rejected, transaction, "目前沒有待復原的 Claude 切換交易。");
+            return new(SwitchOutcome.Rejected, transaction, "目前沒有待復原的帳號切換。");
         }
 
         IClaudeDesktopInstallationLocator.ObservationResult observed = await installationLocator
@@ -517,22 +517,24 @@ public sealed class ClaudeDesktopSwitchService {
             .Take(64)
             .Select(character => character is >= 'a' and <= 'z' or >= '0' and <= '9' or '-' ? character : '-')
             .ToArray());
-        string description = code switch {
-            "binding-invalid" => "保存的來源綁定無效",
-            "source-identity-unknown" => "無法確認來源身分",
-            "multiple-data-roots" => "找到多個資料根目錄",
-            "data-layout-unknown" => "無法確認資料結構",
-            "data-root-changed" => "資料根目錄已變更",
-            "desktop-not-stopped" => "Claude Desktop 尚未停止",
-            "local-state-changed" => "Local State 已變更",
-            "source-changed" => "來源驗證期間發生變更",
-            "installation-id-mismatch" => "安裝識別碼不符",
-            "running-installation-mismatch" => "執行中的安裝識別碼不符",
-            _ => $"定位原因：{code}"
-        };
         SwitchResult result = await RecordRecoveryRequiredAsync(transaction, $"installation_unavailable:{code}")
             .ConfigureAwait(false);
-        return result with { Message = $"無法確認原 Claude Desktop 安裝。{description}。" };
+        return result with { Message = DescribeInstallationFailure(code) };
+    }
+
+    private static string DescribeInstallationFailure(string code) {
+        return code switch {
+            "desktop-not-stopped" or "running-installation-mismatch" or "source-changed"
+                => "Claude Desktop 尚未完全結束，請先正常結束 Claude Desktop 後按「重試復原」。",
+            "multiple-data-roots" or "installation-id-mismatch"
+                => "找到多份 Claude Desktop 安裝或資料，請確認只保留一份後按「重試復原」。",
+            // 復原待處理期間無法重新保存帳號，因此資料已變動時不指示使用者重新保存。
+            "local-state-changed" or "data-root-changed" or "binding-invalid" or "data-layout-unknown"
+                => "Claude Desktop 的資料已變動，無法自動復原，原資料已保留。",
+            "source-identity-unknown"
+                => "無法確認原 Claude Desktop 的來源，請確認使用切換時的 Windows 使用者登入，稍後按「重試復原」。",
+            _ => "無法確認原 Claude Desktop 安裝，請稍後按「重試復原」。"
+        };
     }
 
     private async Task<SwitchPreview> BuildPreviewCoreAsync(Guid targetProfileId, CancellationToken cancellationToken) {
@@ -542,7 +544,7 @@ public sealed class ClaudeDesktopSwitchService {
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             throw;
         } catch (Exception) {
-            return SwitchPreview.Failed(PreviewOutcome.Blocked, null, null, false, "無法載入 Claude profile 清單。");
+            return SwitchPreview.Failed(PreviewOutcome.Blocked, null, null, false, "無法載入 Claude 帳號清單。");
         }
 
         ClaudeSwitchTransaction? transaction;
@@ -551,7 +553,7 @@ public sealed class ClaudeDesktopSwitchService {
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             throw;
         } catch (Exception) {
-            return SwitchPreview.Failed(PreviewOutcome.Blocked, null, null, false, "無法確認是否有待復原的 Claude 交易。");
+            return SwitchPreview.Failed(PreviewOutcome.Blocked, null, null, false, "無法確認是否有待復原的帳號切換。");
         }
 
         if (IsCommittedCleanupPending(transaction)) {
@@ -578,7 +580,7 @@ public sealed class ClaudeDesktopSwitchService {
                 catalog.Profiles.FirstOrDefault(profile => profile.ProfileId == transaction!.SourceProfileId),
                 catalog.Profiles.FirstOrDefault(profile => profile.ProfileId == targetProfileId),
                 historyService is not null,
-                "有未完成的 Claude Desktop 復原交易，請先完成復原。"
+                "有尚未完成的 Claude Desktop 帳號切換，請先完成復原。"
             ) with { Transaction = transaction };
         }
 
@@ -613,7 +615,7 @@ public sealed class ClaudeDesktopSwitchService {
         );
         if (targetProfile is null) {
             return SwitchPreview.Failed(PreviewOutcome.TargetMissing, null, null, historyService is not null,
-                "找不到指定的目標 Claude profile。");
+                "找不到指定的目標 Claude 帳號。");
         }
 
         ClaudeDesktopIdentityReader.Result currentIdentity;
@@ -648,17 +650,17 @@ public sealed class ClaudeDesktopSwitchService {
             throw;
         } catch (Exception) {
             return SwitchPreview.Failed(PreviewOutcome.SourceBindingMismatch, sourceProfile, targetProfile,
-                historyService is not null, "無法讀取來源 profile snapshot 的安全綁定資料。");
+                historyService is not null, "來源帳號的資料與目前安裝不符，請重新保存來源帳號。");
         }
 
         if (sourceSnapshot is null || !IsProfileSnapshot(sourceProfile, sourceSnapshot, locateResult.Installation)) {
             return SwitchPreview.Failed(PreviewOutcome.SourceBindingMismatch, sourceProfile, targetProfile,
-                historyService is not null, "來源 profile 的 Windows 使用者、安裝或 Local State key 綁定不同。");
+                historyService is not null, "來源帳號的資料與目前安裝不符，請重新保存來源帳號。");
         }
 
         if (sourceProfile.ProfileId == targetProfile.ProfileId) {
             return SwitchPreview.Failed(PreviewOutcome.SameProfile, sourceProfile, targetProfile, historyService is not null,
-                "目前 Claude Desktop 已使用此 profile。");
+                "目前 Claude Desktop 已使用此帳號。");
         }
 
         ClaudeAccountProfile.DesktopSnapshot? targetSnapshot;
@@ -670,18 +672,18 @@ public sealed class ClaudeDesktopSwitchService {
             throw;
         } catch (Exception) {
             return SwitchPreview.Failed(PreviewOutcome.TargetSnapshotMissing, sourceProfile, targetProfile,
-                historyService is not null, "無法讀取目標 profile snapshot。");
+                historyService is not null, "目標帳號的登入資料已遺失或失效，請重新保存此帳號。");
         }
 
         if (targetSnapshot is null) {
             return SwitchPreview.Failed(PreviewOutcome.TargetSnapshotMissing, sourceProfile, targetProfile,
-                historyService is not null, "目標 Claude profile 沒有可還原的 Desktop snapshot。");
+                historyService is not null, "目標帳號的登入資料已遺失或失效，請重新保存此帳號。");
         }
 
         if (!IsProfileSnapshot(targetProfile, targetSnapshot, locateResult.Installation)
             || !HasCompleteCookieSidecarSnapshot(targetSnapshot)) {
             return SwitchPreview.Failed(PreviewOutcome.TargetBindingMismatch, sourceProfile, targetProfile,
-                historyService is not null, "目標 profile snapshot 需要重新捕捉或安全綁定不同。");
+                historyService is not null, "目標帳號的登入資料已遺失或失效，請重新保存此帳號。");
         }
 
         SavedProfileVerification targetVerification = await VerifySavedProfileAsync(
@@ -724,31 +726,8 @@ public sealed class ClaudeDesktopSwitchService {
                 .PreviewReplacementAsync(locateResult.Installation, sourceProfile, targetProfile, cancellationToken)
                 .ConfigureAwait(false);
             if (!history.CanProceed) {
-                string message = history.FailureCode switch {
-                    "history-source-binding-unknown" => "無法確認來源帳號的 Code Session 歷史歸屬，未開始切換。",
-                    "source-directory-missing" => "找不到來源帳號的 Code Session 資料，未開始切換。",
-                    "index-path-is-file" => "Code Session 索引位置是檔案，無法讀取索引，未開始切換。",
-                    "source-index-too-large" => "Code Session 索引項目過多，未開始切換。",
-                    "source-index-entry-unsupported" => "Code Session 索引包含不支援的項目，未開始切換。",
-                    "source-index-json-invalid" => "Code Session 索引格式無效，未開始切換。",
-                    "source-index-session-id-invalid" => "Code Session 索引中的工作階段識別碼無效，未開始切換。",
-                    "source-path-unsafe" => "Code Session 資料的位置未通過安全檢查，未開始切換。",
-                    "source-directory-unreadable" => "無法讀取 Code Session 資料，未開始切換。",
-                    "source-unreadable" => "無法讀取 Code Session 索引，未開始切換。",
-                    "transcript-root-unavailable" => "無法取得 Code Session 紀錄的儲存位置，未開始切換。",
-                    "transcript-root-missing" => "找不到 Code Session 紀錄的儲存位置，未開始切換。",
-                    "transcript-missing" => "找不到索引指向的 Code Session 紀錄，未開始切換。",
-                    "transcript-not-unique" => "索引指向多份 Code Session 紀錄，無法確認使用哪一份，未開始切換。",
-                    "transcript-unreadable" => "無法讀取索引指向的 Code Session 紀錄，未開始切換。",
-                    "transcript-root-unreadable" => "無法讀取 Code Session 紀錄的儲存位置，未開始切換。",
-                    _ => "Code Session 索引或 transcript 指標無法驗證，未開始切換。"
-                };
-                if (!string.IsNullOrWhiteSpace(history.FailureCode)) {
-                    message += $"（原因代碼：{history.FailureCode}）";
-                }
-
                 return SwitchPreview.Failed(PreviewOutcome.HistoryUnavailable, sourceProfile, targetProfile, true,
-                    message) with {
+                    "無法讀取來源帳號的 Code Session 資料，未開始切換。") with {
                         SourceSessionCount = history.SourceSessionCount,
                         TargetSessionCount = history.TargetSessionCount
                     };
@@ -783,11 +762,11 @@ public sealed class ClaudeDesktopSwitchService {
         try {
             candidates = profileStore.GetTokenCandidates(snapshot);
         } catch (Exception) {
-            return new(false, true, "無法解析目標 Claude profile 的 OAuth token。");
+            return new(false, true, "目標帳號的登入已失效，請重新登入並保存。");
         }
 
         if (candidates.Count == 0) {
-            return new(false, true, "目標 Claude profile 沒有可驗證的 OAuth token。");
+            return new(false, true, "目標帳號的登入已失效，請重新登入並保存。");
         }
 
         bool hadUnauthorized = false;
@@ -815,13 +794,13 @@ public sealed class ClaudeDesktopSwitchService {
 
             if (result.Outcome == IClaudeOAuthClient.Outcome.Success
                 && SameIdentity(profile.AccountUuid, profile.OrganizationUuid, result.AccountUuid, result.OrganizationUuid)) {
-                return new(true, false, "目標 Claude profile 已通過 API 身分驗證。");
+                return new(true, false, "目標帳號的身分已確認。");
             }
         }
 
         return hadUnauthorized || hadForbidden
-            ? new(false, true, "目標 Claude profile token 已失效或無權讀取 profile API，請重新登入並保存。")
-            : new(false, false, "目標 Claude profile API 身分與保存的 account／organization 不一致。");
+            ? new(false, true, "目標帳號的登入已失效，請重新登入並保存。")
+            : new(false, false, "目標帳號與保存時的身分不一致，請重新保存。");
     }
 
     private async Task<SwitchResult> RetryCommittedCleanupAsync(
@@ -829,7 +808,7 @@ public sealed class ClaudeDesktopSwitchService {
         CancellationToken cancellationToken
     ) {
         if (!HasTrustedProvenance(transaction)) {
-            return new(SwitchOutcome.CleanupPending, transaction, "舊交易缺少可信來源證據，原始交易與備份已保留。");
+            return new(SwitchOutcome.CleanupPending, transaction, "無法自動確認上次切換的狀態，資料已保留。");
         }
 
         IClaudeDesktopInstallationLocator.LocateResult locateResult;
@@ -884,7 +863,7 @@ public sealed class ClaudeDesktopSwitchService {
         CancellationToken cancellationToken
     ) {
         if (transaction.CurrentStage != ClaudeSwitchTransaction.Stage.CommittedCleanupPending) {
-            return new(SwitchOutcome.Rejected, transaction, "目前沒有待重試的已提交交易清理。");
+            return new(SwitchOutcome.Rejected, transaction, "目前沒有待重試的暫存資料清理。");
         }
 
         if (transaction.TransactionId == Guid.Empty
@@ -917,26 +896,17 @@ public sealed class ClaudeDesktopSwitchService {
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);
-        return new(SwitchOutcome.Succeeded, committed, "切換已完成，交易暫存已清理。");
+        return new(SwitchOutcome.Succeeded, committed, "切換已完成，暫存資料已清理。");
     }
 
     private static SwitchResult CleanupFailure(ClaudeSwitchTransaction transaction, string failureCode) {
-        const string prefix = "cleanup:";
-        int length = Math.Min(failureCode.Length, 96 - prefix.Length);
-        char[] safeCode = new char[length];
-        for (int index = 0; index < length; index++) {
-            char character = failureCode[index];
-            safeCode[index] = char.IsAsciiLetterOrDigit(character) || character is '_' or '-' ? character : '-';
-        }
-
-        string code = prefix + new string(safeCode);
         string description = failureCode switch {
-            "desktop-not-stopped" => "Claude Desktop 尚未停止。",
+            "desktop-not-stopped" => "暫存資料待清理，請先正常結束 Claude Desktop 後重試。",
             "running-installation-mismatch" or "installation-mismatch" or "transaction-binding-mismatch"
-                => "無法確認原交易的 Desktop 安裝。",
-            _ => "無法完成交易暫存清理，稍後可重試。"
+                => "暫存資料待清理，但無法確認原 Claude Desktop 安裝，請確認只保留一份後按「重試暫存清理」。",
+            _ => "暫存資料待清理，稍後可重試。"
         };
-        return new(SwitchOutcome.CleanupPending, transaction, $"切換已完成，{description}（{code}）");
+        return new(SwitchOutcome.CleanupPending, transaction, $"切換已完成，{description}");
     }
 
     private async Task RequireDesktopStoppedAsync(
@@ -1106,10 +1076,9 @@ public sealed class ClaudeDesktopSwitchService {
         string failureCode
     ) {
         if (!HasTrustedProvenance(transaction) || !BindingsEqual(transaction.RootBinding, installation.Binding)) {
-            return new(SwitchOutcome.RecoveryRequired, transaction, "來源證據不足，已保留交易、備份與目前檔案。");
+            return new(SwitchOutcome.RecoveryRequired, transaction, "無法自動確認上次切換的狀態，資料已保留。");
         }
 
-        string? rollbackStep = null;
         try {
             IClaudeAccountRepository.Snapshot catalog = await accountRepository
                 .LoadProfilesAsync(CancellationToken.None)
@@ -1176,14 +1145,12 @@ public sealed class ClaudeDesktopSwitchService {
             installation = rebound.Installation;
             bool historyPreparationOnly = historyService is not null && IsHistoryPreparationOnlyStage(recoveryStage);
             if (historyPreparationOnly) {
-                rollbackStep = "清理 history 準備資料時發生錯誤。";
                 await historyService!.CommitAsync(
                     installation,
                     transaction.TransactionId,
                     ClaudeSessionHistoryCleanupIntent.Preparation,
                     CancellationToken.None
                 ).ConfigureAwait(false);
-                rollbackStep = null;
             } else if (historyService is not null && HasHistoryApplyStarted(recoveryStage)) {
                 if (targetProfile is null) {
                     throw new SwitchOperationException("target_profile_missing");
@@ -1193,14 +1160,12 @@ public sealed class ClaudeDesktopSwitchService {
                     throw new SwitchOperationException("rollback_process_not_stopped_before_history_restore");
                 }
 
-                rollbackStep = "回復目標 history 時發生錯誤。";
                 await historyService.RestoreTargetAsync(
                     installation,
                     targetProfile,
                     transaction.TransactionId,
                     CancellationToken.None
                 ).ConfigureAwait(false);
-                rollbackStep = null;
             }
 
             if (HasAuthApplyStarted(recoveryStage)) {
@@ -1217,10 +1182,8 @@ public sealed class ClaudeDesktopSwitchService {
                     throw new SwitchOperationException("rollback_process_not_stopped_before_auth_restore");
                 }
 
-                rollbackStep = "回復來源認證資料時發生錯誤。";
                 await profileStore.RestoreTransactionAsync(installation, transaction.TransactionId, CancellationToken.None)
                     .ConfigureAwait(false);
-                rollbackStep = null;
             }
 
             await processController.LaunchAsync(installation, CancellationToken.None).ConfigureAwait(false);
@@ -1232,14 +1195,12 @@ public sealed class ClaudeDesktopSwitchService {
             }
 
             if (historyService is not null && HasHistoryApplyStarted(recoveryStage)) {
-                rollbackStep = "清理 history 準備資料時發生錯誤。";
                 await historyService.CommitAsync(
                     installation,
                     transaction.TransactionId,
                     ClaudeSessionHistoryCleanupIntent.Preparation,
                     CancellationToken.None
                 ).ConfigureAwait(false);
-                rollbackStep = null;
             }
 
             if (recoveryStage >= ClaudeSwitchTransaction.Stage.SourceCaptured) {
@@ -1257,7 +1218,7 @@ public sealed class ClaudeDesktopSwitchService {
             return new(SwitchOutcome.FailedRolledBack, rolledBack,
                 "Claude 帳號切換失敗，原來源帳號已還原並重新驗證。");
         } catch (Exception exception) {
-            return await RecordRecoveryRequiredAsync(transaction, GetRollbackFailureCode(exception), rollbackStep)
+            return await RecordRecoveryRequiredAsync(transaction, GetRollbackFailureCode(exception))
                 .ConfigureAwait(false);
         }
     }
@@ -1279,35 +1240,12 @@ public sealed class ClaudeDesktopSwitchService {
         return prefix + new string(safeCode);
     }
 
-    private static string DescribeRollbackFailure(string failureCode, string? rollbackStep) {
-        string stepCode = failureCode["rollback:".Length..];
-        string description = stepCode switch {
-            "source_profile_missing" => "找不到來源 profile。",
-            "target_profile_missing" => "找不到目標 profile。",
-            "source_profile_revision_changed" => "來源 profile 版本已變更。",
-            "target_profile_revision_changed" => "目標 profile 版本已變更。",
-            "source_profile_binding_changed" => "來源 profile 綁定已變更。",
-            "target_profile_binding_changed" => "目標 profile 綁定已變更。",
-            "process_status_unknown" => "無法確認 Claude Desktop 程序狀態。",
-            "rollback_close_timeout" => "關閉 Claude Desktop 逾時。",
-            "rollback_process_still_running" => "Claude Desktop 關閉後仍在執行。",
-            "rollback_binding_revalidation_failed" => "重新驗證 Desktop 來源綁定失敗。",
-            "rollback_process_not_stopped_before_history_restore" => "回復 history 前無法確認 Desktop 已停止。",
-            "rollback_process_not_stopped_before_auth_restore" => "回復認證資料前無法確認 Desktop 已停止。",
-            "source_snapshot_invalid" => "來源認證快照驗證失敗。",
-            "source_restore_unverified" => "來源帳號回復後未通過身分驗證。",
-            _ => $"{rollbackStep}原因代碼：{stepCode}。"
-        };
-        return $"復原步驟失敗。{description}";
-    }
-
     private async Task<SwitchResult> RecordRecoveryRequiredAsync(
         ClaudeSwitchTransaction transaction,
-        string failureCode,
-        string? rollbackStep = null
+        string failureCode
     ) {
         if (!HasTrustedProvenance(transaction)) {
-            return new(SwitchOutcome.RecoveryRequired, transaction, "舊交易缺少可信來源證據，原始紀錄與備份已保留。");
+            return new(SwitchOutcome.RecoveryRequired, transaction, "無法自動確認上次切換的狀態，資料已保留。");
         }
 
         ClaudeSwitchTransaction pending = transaction with {
@@ -1328,10 +1266,24 @@ public sealed class ClaudeDesktopSwitchService {
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);
-        string message = pending.FailureCode?.StartsWith("rollback:", StringComparison.Ordinal) == true
-            ? DescribeRollbackFailure(pending.FailureCode, rollbackStep)
-            : "Claude 切換未完成且來源尚未通過回復驗證。請保留 Claude Desktop 資料，完成待復原操作後再切換。";
+        string message = IsProcessFailureCode(failureCode)
+            ? "復原未完成：Claude Desktop 仍在執行或無法確認已結束，請先正常結束 Claude Desktop 後按「重試復原」。"
+            : pending.FailureCode?.StartsWith("rollback:", StringComparison.Ordinal) == true
+                ? "復原未完成，請稍後重試；仍失敗時請保留 Claude Desktop 資料。"
+                : "切換尚未完成。請保留 Claude Desktop 資料，並先完成復原再切換。";
         return new(SwitchOutcome.RecoveryRequired, pending, message);
+    }
+
+    private static bool IsProcessFailureCode(string failureCode) {
+        const string rollbackPrefix = "rollback:";
+        string stepCode = failureCode.StartsWith(rollbackPrefix, StringComparison.Ordinal)
+            ? failureCode[rollbackPrefix.Length..]
+            : failureCode;
+        return stepCode is "process_status_unknown"
+            or "rollback_close_timeout"
+            or "rollback_process_still_running"
+            or "rollback_process_not_stopped_before_history_restore"
+            or "rollback_process_not_stopped_before_auth_restore";
     }
 
     private async Task<ClaudeSwitchTransaction> SaveStageAsync(

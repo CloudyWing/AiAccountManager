@@ -505,9 +505,9 @@ public sealed class CodexQuotaService {
                 ).ConfigureAwait(false);
             }
 
-            if (parsed.Status != QuotaParseStatus.Complete
-                || parsed.FiveHour is null
-                || parsed.Weekly is null) {
+            bool hasStandardWindows = parsed.FiveHour is not null && parsed.Weekly is not null;
+            bool hasFreePlanWindow = parsed.FreePlanWindow is not null;
+            if (parsed.Status != QuotaParseStatus.Complete || hasStandardWindows == hasFreePlanWindow) {
                 throw new InvalidDataException("Codex rate-limit response was invalid.");
             }
 
@@ -529,7 +529,8 @@ public sealed class CodexQuotaService {
                     clock.UtcNow,
                     parsed.FiveHour,
                     parsed.Weekly,
-                    parsed.ResetCredits
+                    parsed.ResetCredits,
+                    parsed.FreePlanWindow
                 ),
                 new QuotaRefreshAttempt(QuotaRefreshStatus.Unknown, clock.UtcNow, null, 0, null, [])
             );
@@ -715,14 +716,14 @@ public sealed class CodexQuotaService {
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             throw;
         } catch (Exception) {
-            return CreateUnsavedFailureView(profile.AccountId, current, status, failureCode);
+            return CreateUnsavedFailureView(profile.AccountId, current, status);
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);
         if (!save.Saved) {
             // 重置後的刷新不可回讀舊快照，否則可能以舊的 Fresh 誤判刷新成功。
             return afterReset
-                ? CreateUnsavedFailureView(profile.AccountId, current, status, failureCode)
+                ? CreateUnsavedFailureView(profile.AccountId, current, status)
                 : await GetViewAsync(profile.AccountId, cancellationToken).ConfigureAwait(false);
         }
 
@@ -733,15 +734,14 @@ public sealed class CodexQuotaService {
     private static QuotaSnapshotView CreateUnsavedFailureView(
         Guid accountId,
         QuotaSnapshotRecord current,
-        QuotaRefreshStatus status,
-        string failureCode
+        QuotaRefreshStatus status
     ) {
         return new QuotaSnapshotView(
             accountId,
             current,
             StatusFor(status),
             current.LastSuccessfulSnapshot is not null,
-            UserMessage(status, failureCode)
+            UserMessage(status)
         );
     }
 
@@ -856,7 +856,7 @@ public sealed class CodexQuotaService {
             null,
             QuotaDisplayStatus.Error,
             false,
-            "Codex 額度資料無法讀取或格式無效，原始檔案已保留。確認檔案與存取權限後可重新整理。"
+            "Codex 額度資料無法讀取，請重新整理額度。"
         );
     }
 
@@ -913,12 +913,12 @@ public sealed class CodexQuotaService {
 
         if (success is null) {
             return attempt?.Status == QuotaRefreshStatus.Error
-                ? new QuotaSnapshotView(accountId, snapshot, QuotaDisplayStatus.Error, false, UserMessage(QuotaRefreshStatus.Error, attempt.FailureCode))
+                ? new QuotaSnapshotView(accountId, snapshot, QuotaDisplayStatus.Error, false, UserMessage(QuotaRefreshStatus.Error))
                 : new QuotaSnapshotView(accountId, snapshot, QuotaDisplayStatus.Unknown, false, null);
         }
 
         string? message = attempt?.Status == QuotaRefreshStatus.Error
-            ? UserMessage(QuotaRefreshStatus.Error, attempt.FailureCode)
+            ? UserMessage(QuotaRefreshStatus.Error)
             : null;
         return new QuotaSnapshotView(
             accountId,
@@ -939,11 +939,11 @@ public sealed class CodexQuotaService {
         };
     }
 
-    private static string UserMessage(QuotaRefreshStatus status, string? failureCode) {
+    private static string UserMessage(QuotaRefreshStatus status) {
         return status switch {
             QuotaRefreshStatus.ReauthenticationRequired => "Codex 登入需要重新確認；舊額度仍保留並標示為過期。",
             QuotaRefreshStatus.Incomplete => "Codex 額度回應不完整；已保留上一份完整值。",
-            _ => "無法更新 Codex 額度（" + (failureCode ?? "unknown") + "）。"
+            _ => "無法更新 Codex 額度，請稍後重試。"
         };
     }
 

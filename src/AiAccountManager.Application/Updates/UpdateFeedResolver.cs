@@ -21,7 +21,7 @@ public static class UpdateFeedResolver {
             || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
             || string.IsNullOrWhiteSpace(uri.Host)
             || !string.IsNullOrEmpty(uri.UserInfo)) {
-            throw new InvalidDataException("更新來源必須是未含帳密的絕對 HTTPS 網址。");
+            throw new InvalidDataException("更新來源必須是 HTTPS 網址，且不可包含帳號密碼。");
         }
 
         return uri;

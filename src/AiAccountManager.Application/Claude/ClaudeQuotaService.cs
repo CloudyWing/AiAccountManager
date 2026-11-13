@@ -90,14 +90,14 @@ public sealed class ClaudeQuotaService {
             null,
             ClaudeQuotaSnapshot.RefreshStatus.Unknown,
             null,
-            "尚未查詢此 Claude profile 的額度。"
+            "尚未查詢此 Claude 帳號的額度。"
         );
         if (view.Status == ClaudeQuotaSnapshot.RefreshStatus.Refreshing) {
             view = view with {
                 Status = view.Snapshot is null
                     ? ClaudeQuotaSnapshot.RefreshStatus.Unknown
                     : ClaudeQuotaSnapshot.RefreshStatus.Stale,
-                Message = "上一次 quota 查詢未完成，以下保留最近一次成功快照。"
+                Message = "上一次額度查詢未完成，顯示的是上次成功的結果。"
             };
         }
 
@@ -166,7 +166,7 @@ public sealed class ClaudeQuotaService {
                     profileId,
                     previousSnapshot,
                     ClaudeQuotaSnapshot.RefreshStatus.Error,
-                    "找不到指定的 Claude profile。"
+                    "找不到指定的 Claude 帳號。"
                 );
                 SetView(result);
                 return result;
@@ -187,7 +187,7 @@ public sealed class ClaudeQuotaService {
                     profileId,
                     previousSnapshot,
                     ClaudeQuotaSnapshot.RefreshStatus.ReauthenticationRequired,
-                    "此 Claude profile 缺少有效的 Desktop token 或安全綁定，請重新保存帳號。"
+                    "此帳號的登入資料已遺失或失效，請在 Claude Desktop 重新登入並重新保存帳號。"
                 );
                 return await SaveResultAsync(result, stored?.Sha256, operationCancellationToken).ConfigureAwait(false);
             }
@@ -199,7 +199,7 @@ public sealed class ClaudeQuotaService {
                     profileId,
                     previousSnapshot,
                     ClaudeQuotaSnapshot.RefreshStatus.ReauthenticationRequired,
-                    "此 Claude profile 沒有可驗證的 Desktop OAuth token，請重新保存帳號。"
+                    "登入已失效，請在 Claude Desktop 重新登入並重新保存帳號。"
                 );
                 return await SaveResultAsync(result, stored?.Sha256, operationCancellationToken).ConfigureAwait(false);
             }
@@ -256,12 +256,12 @@ public sealed class ClaudeQuotaService {
                     previousSnapshot,
                     status,
                     status == ClaudeQuotaSnapshot.RefreshStatus.ReauthenticationRequired
-                        ? "Claude OAuth token 已失效或無權讀取 profile，請在 Desktop 重新登入並重新保存帳號。"
+                        ? "登入已失效，請在 Claude Desktop 重新登入並重新保存帳號。"
                         : status == ClaudeQuotaSnapshot.RefreshStatus.Stale
-                            ? "profile API 暫時限制查詢，保留上次成功的額度。"
+                            ? "查詢過於頻繁，顯示的是上次成功的結果。"
                             : status == ClaudeQuotaSnapshot.RefreshStatus.Error
-                                ? "profile API 限制查詢，尚無可顯示的額度快照。"
-                                : "目前無法確認此 Desktop token 與已保存 profile 的帳號／組織相符。"
+                                ? "查詢過於頻繁，尚無可顯示的額度，請稍後再試。"
+                                : "目前無法確認登入帳號與已保存帳號相符。"
                 ) with {
                     RetryAfterUtc = rateLimited && profileRetryAfter is TimeSpan retryAfter
                         ? clock.UtcNow + retryAfter
@@ -282,7 +282,7 @@ public sealed class ClaudeQuotaService {
                     profileId,
                     previousSnapshot,
                     previousSnapshot is null ? ClaudeQuotaSnapshot.RefreshStatus.Error : ClaudeQuotaSnapshot.RefreshStatus.Stale,
-                    "無法連線至 Claude usage API，保留上次成功的額度。"
+                    "目前無法查詢額度，顯示的是上次成功的結果。"
                 );
                 return await SaveResultAsync(result, stored?.Sha256, operationCancellationToken).ConfigureAwait(false);
             }
@@ -295,7 +295,7 @@ public sealed class ClaudeQuotaService {
                         profileId,
                         previousSnapshot,
                         ClaudeQuotaSnapshot.RefreshStatus.ReauthenticationRequired,
-                        "Claude OAuth token 已失效或無權讀取 usage，請在 Desktop 重新登入並重新保存帳號。"
+                        "登入已失效，請在 Claude Desktop 重新登入並重新保存帳號。"
                     ),
                 IClaudeOAuthClient.Outcome.RateLimited => CreateRateLimitedView(
                     profileId,
@@ -306,7 +306,7 @@ public sealed class ClaudeQuotaService {
                     profileId,
                     previousSnapshot,
                     previousSnapshot is null ? ClaudeQuotaSnapshot.RefreshStatus.Error : ClaudeQuotaSnapshot.RefreshStatus.Stale,
-                    "Claude usage API 回傳無法使用的結果，保留上次成功的額度。"
+                    "目前無法查詢額度，顯示的是上次成功的結果。"
                 )
             };
         } catch (OperationCanceledException) when (operationCancellationToken.IsCancellationRequested) {
@@ -314,14 +314,14 @@ public sealed class ClaudeQuotaService {
                 profileId,
                 previousSnapshot,
                 previousSnapshot is null ? ClaudeQuotaSnapshot.RefreshStatus.Error : ClaudeQuotaSnapshot.RefreshStatus.Stale,
-                "Claude quota 查詢已取消，保留上次成功的額度。"
+                "額度查詢已取消，顯示的是上次成功的結果。"
             );
         } catch (Exception) {
             result = CreateFailure(
                 profileId,
                 previousSnapshot,
                 previousSnapshot is null ? ClaudeQuotaSnapshot.RefreshStatus.Error : ClaudeQuotaSnapshot.RefreshStatus.Stale,
-                "Claude quota 查詢發生錯誤，保留上次成功的額度。"
+                "目前無法查詢額度，顯示的是上次成功的結果。"
             );
         }
 
@@ -339,7 +339,7 @@ public sealed class ClaudeQuotaService {
                 profileId,
                 previousSnapshot,
                 ClaudeQuotaSnapshot.RefreshStatus.Incomplete,
-                parsed.Message ?? "Claude usage 回應不完整，保留上次成功的額度。"
+                parsed.Message ?? "額度資料格式無法辨識，請稍後再試。"
             );
         }
 
@@ -364,9 +364,7 @@ public sealed class ClaudeQuotaService {
             profileId,
             previousSnapshot,
             previousSnapshot is null ? ClaudeQuotaSnapshot.RefreshStatus.Error : ClaudeQuotaSnapshot.RefreshStatus.Stale,
-            retryAfterUtc is DateTimeOffset retryAt
-                ? $"Claude usage API 限制查詢，最早可於 {retryAt:yyyy-MM-dd HH:mm:ss 'UTC'} 再試。"
-                : "Claude usage API 限制查詢，請稍後再試。"
+            "查詢過於頻繁，請稍後再試。"
         ) with { RetryAfterUtc = retryAfterUtc };
     }
 
@@ -401,14 +399,14 @@ public sealed class ClaudeQuotaService {
                         ? ClaudeQuotaSnapshot.RefreshStatus.Error
                         : ClaudeQuotaSnapshot.RefreshStatus.Stale,
                     view.LastAttemptAtUtc,
-                    "額度快照已在其他作業中更新，保留最新保存資料。"
+                    "額度資料已在其他作業中更新，顯示最新保存的資料。"
                 );
             } else {
                 view = view with {
                     Status = view.Snapshot is null
                         ? ClaudeQuotaSnapshot.RefreshStatus.Error
                         : ClaudeQuotaSnapshot.RefreshStatus.Stale,
-                    Message = "無法保存 quota 查詢結果，畫面保留最近一次成功快照。"
+                    Message = "無法保存額度查詢結果，顯示的是上次成功的結果。"
                 };
             }
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
@@ -416,14 +414,14 @@ public sealed class ClaudeQuotaService {
                 Status = view.Snapshot is null
                     ? ClaudeQuotaSnapshot.RefreshStatus.Error
                     : ClaudeQuotaSnapshot.RefreshStatus.Stale,
-                Message = "quota 查詢結果尚未保存，畫面保留最近一次成功快照。"
+                Message = "額度查詢結果尚未保存，顯示的是上次成功的結果。"
             };
         } catch (Exception) {
             view = view with {
                 Status = view.Snapshot is null
                     ? ClaudeQuotaSnapshot.RefreshStatus.Error
                     : ClaudeQuotaSnapshot.RefreshStatus.Stale,
-                Message = "無法保存 quota 查詢結果，畫面保留最近一次成功快照。"
+                Message = "無法保存額度查詢結果，顯示的是上次成功的結果。"
             };
         }
 

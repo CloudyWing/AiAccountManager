@@ -13,6 +13,7 @@ namespace CloudyWing.AiAccountManager.Desktop.Components.Dashboard;
 public sealed class DashboardOverviewReader : IDashboardOverviewReader {
     private const string CodexSourceLabel = "Codex Desktop 身分與已保存額度";
     private const string ClaudeSourceLabel = "Claude Desktop 身分與已保存額度";
+    private const string FreePlanLabel = "免費方案";
     private readonly CodexLocalIdentityService codexIdentity;
     private readonly CodexQuotaService codexQuota;
     private readonly ClaudeAccountService claudeAccounts;
@@ -74,8 +75,8 @@ public sealed class DashboardOverviewReader : IDashboardOverviewReader {
             QuotaSuccessfulSnapshot? quota = view.Snapshot?.LastSuccessfulSnapshot;
             string name = !string.IsNullOrWhiteSpace(profile.Alias) && !profile.Alias.Contains('@')
                 ? profile.Alias : profile.MaskedIdentity;
-            accounts.Add(new(profile.AccountId, name, quota?.FiveHour.RemainingPercent, quota?.Weekly.RemainingPercent,
-                quota?.FiveHour.ResetsAtUtc, view.AccountId == profile.AccountId
+            accounts.Add(new(profile.AccountId, name, quota?.FiveHour?.RemainingPercent, quota?.Weekly?.RemainingPercent,
+                quota?.FiveHour?.ResetsAtUtc, view.AccountId == profile.AccountId
                     && view.Snapshot?.AccountId == profile.AccountId
                     && view.Status == QuotaDisplayStatus.Fresh && !view.IsStale));
         }
@@ -129,6 +130,9 @@ public sealed class DashboardOverviewReader : IDashboardOverviewReader {
         QuotaSnapshotView view = await codexQuota.GetViewAsync(accountId, cancellationToken).ConfigureAwait(false);
         if (view.AccountId != accountId || view.Snapshot?.AccountId != accountId
             || view.Status != QuotaDisplayStatus.Fresh || view.IsStale || view.Snapshot?.LastSuccessfulSnapshot is not QuotaSuccessfulSnapshot quota) {
+            return null;
+        }
+        if (quota.FiveHour is null || quota.Weekly is null) {
             return null;
         }
         RecommendationAccount? recommendation = null;
@@ -192,7 +196,7 @@ public sealed class DashboardOverviewReader : IDashboardOverviewReader {
                     ? DashboardOverviewSnapshot.IdentityStatus.Error
                     : MapCodexIdentityStatus(identity.Status);
                 string? identityMessage = identity.Status == CodexLocalIdentityStatus.Matched
-                    ? "Codex Desktop 身分匹配結果不完整，未讀取額度。"
+                    ? "無法確認目前登入的 Codex 帳號，未讀取額度。"
                     : CodexIdentityMessage(identity.Status);
                 return CreateProvider(
                     DashboardOverviewSnapshot.ProviderKind.Codex,
@@ -221,7 +225,7 @@ public sealed class DashboardOverviewReader : IDashboardOverviewReader {
                     identity.MaskedIdentity,
                     CodexSourceLabel,
                     null,
-                    "Codex 額度資料與目前匹配帳號不一致，已隱藏該資料。",
+                    "額度資料與目前登入的帳號不符，請重新整理額度。",
                     identity.CheckedAtUtc,
                     null,
                     [],
@@ -231,31 +235,20 @@ public sealed class DashboardOverviewReader : IDashboardOverviewReader {
 
             QuotaSuccessfulSnapshot? success = view.Snapshot?.LastSuccessfulSnapshot;
             bool hasInvalidValue = success is not null
-                && (success.FiveHour.RemainingPercent is < 0 or > 100
-                    || success.Weekly.RemainingPercent is < 0 or > 100);
-            IReadOnlyList<DashboardOverviewSnapshot.QuotaWindow> windows = success is null
-                ? []
-                : [
-                    new(
-                        "codex-five-hour",
-                        "5 小時",
-                        null,
-                        ToRemainingPercent(success.FiveHour.RemainingPercent),
-                        success.FiveHour.ResetsAtUtc
-                    ),
-                    new(
-                        "codex-weekly",
-                        "每週",
-                        null,
-                        ToRemainingPercent(success.Weekly.RemainingPercent),
-                        success.Weekly.ResetsAtUtc
-                    )
-                ];
+                && (IsInvalidPercent(success.FiveHour)
+                    || IsInvalidPercent(success.Weekly)
+                    || IsInvalidPercent(success.FreePlanWindow));
+            List<DashboardOverviewSnapshot.QuotaWindow> windows = [];
+            if (success is not null) {
+                AddCodexWindow(windows, "codex-five-hour", success.FiveHour);
+                AddCodexWindow(windows, "codex-weekly", success.Weekly);
+                AddCodexWindow(windows, "codex-free-plan", success.FreePlanWindow);
+            }
             DashboardOverviewSnapshot.QuotaStatus quotaStatus = hasInvalidValue
                 ? DashboardOverviewSnapshot.QuotaStatus.Incomplete
                 : MapCodexQuotaStatus(view.Status);
             string? quotaMessage = hasInvalidValue
-                ? "Codex 額度資料含無效比例，該視窗已標示為未知。"
+                ? "部分額度資料不完整，無法顯示。"
                 : view.Message;
 
             return CreateProvider(
@@ -269,7 +262,8 @@ public sealed class DashboardOverviewReader : IDashboardOverviewReader {
                 identity.CheckedAtUtc,
                 success?.RetrievedAtUtc,
                 windows,
-                view.IsStale
+                view.IsStale,
+                success?.IsFreePlan == true ? FreePlanLabel : null
             );
         } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
             throw;
@@ -312,7 +306,7 @@ public sealed class DashboardOverviewReader : IDashboardOverviewReader {
 
                 string? identityMessage = pageState.RecoveryRequired
                     ? "Claude Desktop 有尚未完成的切換復原，完成復原前不讀取額度。"
-                    : identity.Message ?? "Claude Desktop 身分尚未匹配已保存 profile，未讀取額度。";
+                    : identity.Message ?? "目前登入的帳號未對應已保存帳號，請前往管理頁確認。";
                 return CreateProvider(
                     DashboardOverviewSnapshot.ProviderKind.Claude,
                     identityStatus,
@@ -340,7 +334,7 @@ public sealed class DashboardOverviewReader : IDashboardOverviewReader {
                     maskedIdentity,
                     ClaudeSourceLabel,
                     null,
-                    "Claude 額度資料與目前匹配 profile 不一致，已隱藏該資料。",
+                    "額度資料與目前登入的帳號不符，請重新整理額度。",
                     identity.VerifiedAtUtc,
                     null,
                     [],
@@ -372,7 +366,7 @@ public sealed class DashboardOverviewReader : IDashboardOverviewReader {
                 ? DashboardOverviewSnapshot.QuotaStatus.Incomplete
                 : MapClaudeQuotaStatus(view.Status);
             string? quotaMessage = hasInvalidValue
-                ? "Claude 額度資料含無效或缺少的視窗，未知比例不會顯示為 0%。"
+                ? "部分額度資料不完整，無法顯示。"
                 : view.Message;
 
             return CreateProvider(
@@ -418,7 +412,8 @@ public sealed class DashboardOverviewReader : IDashboardOverviewReader {
         DateTimeOffset? checkedAtUtc,
         DateTimeOffset? retrievedAtUtc,
         IReadOnlyList<DashboardOverviewSnapshot.QuotaWindow> windows,
-        bool isStale
+        bool isStale,
+        string? planLabel = null
     ) {
         return new(
             kind,
@@ -431,7 +426,8 @@ public sealed class DashboardOverviewReader : IDashboardOverviewReader {
             checkedAtUtc,
             retrievedAtUtc,
             windows,
-            isStale
+            isStale,
+            planLabel
         );
     }
 
@@ -452,8 +448,8 @@ public sealed class DashboardOverviewReader : IDashboardOverviewReader {
     private static string? CodexIdentityMessage(CodexLocalIdentityStatus status) {
         return status switch {
             CodexLocalIdentityStatus.Matched => null,
-            CodexLocalIdentityStatus.Unmatched => "目前 Codex Desktop 身分未匹配已保存帳號，請前往 Codex 管理頁確認。",
-            CodexLocalIdentityStatus.Ambiguous => "目前 Codex Desktop 身分匹配多筆已保存帳號，請前往 Codex 管理頁確認。",
+            CodexLocalIdentityStatus.Unmatched => "目前 Codex Desktop 身分未對應已保存帳號，請前往 Codex 管理頁確認。",
+            CodexLocalIdentityStatus.Ambiguous => "目前 Codex Desktop 身分對應到多筆已保存帳號，請前往 Codex 管理頁確認。",
             CodexLocalIdentityStatus.FileMissing => "找不到 Codex Desktop 本機身分，請確認已登入並前往管理頁處理。",
             CodexLocalIdentityStatus.UnsupportedAuth => "目前 Codex 登入方式不受支援，請前往 Codex 管理頁確認。",
             CodexLocalIdentityStatus.CatalogUnavailable => "無法讀取已保存的 Codex 帳號清單。",
@@ -507,6 +503,28 @@ public sealed class DashboardOverviewReader : IDashboardOverviewReader {
             ClaudeQuotaSnapshot.RefreshStatus.Incomplete => DashboardOverviewSnapshot.QuotaStatus.Incomplete,
             _ => DashboardOverviewSnapshot.QuotaStatus.Unknown
         };
+    }
+
+    private static bool IsInvalidPercent(QuotaWindow? window) {
+        return window is not null && window.RemainingPercent is < 0 or > 100;
+    }
+
+    private static void AddCodexWindow(
+        List<DashboardOverviewSnapshot.QuotaWindow> windows,
+        string key,
+        QuotaWindow? window
+    ) {
+        if (window is null) {
+            return;
+        }
+
+        windows.Add(new(
+            key,
+            QuotaWindowLabels.ForDuration(window.DurationMinutes),
+            null,
+            ToRemainingPercent(window.RemainingPercent),
+            window.ResetsAtUtc
+        ));
     }
 
     private static decimal? ToRemainingPercent(int value) {

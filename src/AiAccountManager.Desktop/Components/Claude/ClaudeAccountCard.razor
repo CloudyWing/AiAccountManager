@@ -73,7 +73,7 @@
         @if (!string.IsNullOrWhiteSpace(QuotaMessage)) {
             <MudAlert Severity="@QuotaMessageSeverity" Variant="Variant.Outlined" Dense="true">@QuotaMessage</MudAlert>
         } else if (QuotaWindows.Count == 0 && !IsQuotaLoading) {
-            <MudText Typo="Typo.body2" Class="mud-text-secondary">尚未取得此帳號的額度快照。</MudText>
+            <MudText Typo="Typo.body2" Class="mud-text-secondary">尚未取得此帳號的額度。</MudText>
         }
 
         <div class="account-primary-actions">
@@ -107,14 +107,8 @@
                 }
                 @if (!string.IsNullOrWhiteSpace(IdentityEvidenceText)) {
                     <div>
-                        <dt>身分證據</dt>
+                        <dt>最近驗證</dt>
                         <dd>@IdentityEvidenceText</dd>
-                    </div>
-                }
-                @if (!string.IsNullOrWhiteSpace(QuotaSourceText)) {
-                    <div>
-                        <dt>額度查詢來源</dt>
-                        <dd>@QuotaSourceText</dd>
                     </div>
                 }
                 @if (!string.IsNullOrWhiteSpace(QuotaCheckedAtText)) {
@@ -206,9 +200,6 @@
 
     [Parameter]
     public string? QuotaMessage { get; set; }
-
-    [Parameter]
-    public string? QuotaSourceText { get; set; }
 
     [Parameter]
     public string? QuotaCheckedAtText { get; set; }

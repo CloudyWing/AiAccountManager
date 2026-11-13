@@ -105,6 +105,26 @@ public sealed class CodexDialogTests : ComponentTestBase {
     }
 
     [Test]
+    public void ResetCreditDialog_FreePlan_DescribesSingleWindow() {
+        IRenderedComponent<MudDialogProvider> provider = RenderDialogProvider();
+        QuotaSuccessfulSnapshot snapshot = new(
+            DateTimeOffset.Parse("2026-10-28T00:00:00Z"),
+            null,
+            null,
+            FreePlanWindow: new QuotaWindow(43200, 90, null)
+        );
+        Context.Render<ResetCreditDialog>(parameters => parameters
+            .Add(p => p.Visible, true)
+            .Add(p => p.Snapshot, snapshot));
+
+        provider.WaitForAssertion(() => Assert.Multiple(() => {
+            Assert.That(provider.Markup, Does.Contain("30 天：已用 10%・原重置時間 未知"));
+            Assert.That(provider.Markup, Does.Not.Contain("5 小時"));
+            Assert.That(provider.Markup, Does.Not.Contain("每週"));
+        }));
+    }
+
+    [Test]
     public void ResetCreditDialog_WithSpecificCredit_HidesSystemPickedHint() {
         IRenderedComponent<MudDialogProvider> provider = RenderDialogProvider();
         Context.Render<ResetCreditDialog>(parameters => parameters
