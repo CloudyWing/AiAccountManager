@@ -284,19 +284,39 @@ public partial class MainWindow : Window {
                         return;
                     }
                 } catch (TimeoutException) {
-                    if (navigated) {
-                        recoveryLog.Write("rebuild.route-restored");
-                        return;
-                    }
+                    // 逾時是否已導覽由下方統一判定。
                 }
 
-                await Task.Delay(RouteRetryDelay);
+                if (navigated) {
+                    recoveryLog.Write("rebuild.route-restored");
+                    return;
+                }
+
+                if (GetRouteRetryDelay(deadline - DateTimeOffset.UtcNow) is not TimeSpan retryDelay) {
+                    recoveryLog.Write("rebuild.route-restore-failed:deadline-exceeded");
+                    return;
+                }
+
+                await Task.Delay(retryDelay);
             }
 
             recoveryLog.Write("rebuild.route-restore-failed:attempts-exhausted:" + RouteRestoreMaxAttempts);
         } catch (Exception exception) {
             recoveryLog.Write($"rebuild.route-restore-failed:{exception.GetType().FullName}:0x{exception.HResult:X8}");
         }
+    }
+
+    /// <summary>
+    /// 依距離整體期限的剩餘時間，決定下一次重試前的等待時間。
+    /// </summary>
+    /// <param name="remaining">距離整體期限的剩餘時間。</param>
+    /// <returns>等待時間，不超過剩餘時間；期限已到時為 null。</returns>
+    public static TimeSpan? GetRouteRetryDelay(TimeSpan remaining) {
+        if (remaining <= TimeSpan.Zero) {
+            return null;
+        }
+
+        return remaining < RouteRetryDelay ? remaining : RouteRetryDelay;
     }
 
     private bool CanRestoreRoute(BlazorWebView target) {
